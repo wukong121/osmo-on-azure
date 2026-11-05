@@ -1,18 +1,25 @@
 # osmo-on-azure
 
-在 Azure 上部署 NVIDIA OSMO，为具身智能和机器人团队提供云端仿真作业调度方案。
+English | [简体中文](README.zh-CN.md)
 
-## 文档
+Deploy [NVIDIA OSMO](https://github.com/NVIDIA/OSMO) on Azure to give embodied-AI and robotics teams a cloud-based scheduling platform for simulation jobs.
 
-| 文档 | 内容 |
+## Architecture (PoC phase 1)
+
+![OSMO on Azure architecture](docs/images/azure-architecture.svg)
+
+## Documents
+
+| Document | Contents |
 |---|---|
-| [docs/background.md](docs/background.md) | 项目背景、技术选型、PoC 成功标准、待确认事项 |
-| [docs/reference-repos.md](docs/reference-repos.md) | 参考仓库研读结论（NVIDIA/OSMO、microsoft/physical-ai-toolchain）：版本选择、PG TLS、可复用内容 |
-| [docs/t4-feasibility.md](docs/t4-feasibility.md) | T4 GPU 运行 Isaac Lab / Isaac Sim / MuJoCo / Gazebo 的可行性评估 |
-| [docs/images/](docs/images/) | OSMO 部署架构图、工作流时序图 |
+| [docs/background.md](docs/background.md) (Chinese) | Project background, technology choices, PoC success criteria, open items |
+| [docs/reference-repos.md](docs/reference-repos.md) (Chinese) | Review of the reference repos (NVIDIA/OSMO, microsoft/physical-ai-toolchain): version choice, PostgreSQL TLS, reusable parts |
+| [docs/t4-feasibility.md](docs/t4-feasibility.md) (Chinese) | Feasibility of running Isaac Lab / Isaac Sim / MuJoCo / Gazebo on T4 GPUs |
+| [docs/images/](docs/images/) | Azure architecture, OSMO deployment architecture, OSMO workflow sequence |
+| [infra/terraform/](infra/terraform/README.md) | Azure infrastructure: AKS, T4 GPU node pool, private data services |
 
-## 当前技术选型（PoC 第一阶段）
+## Current technology choices (PoC phase 1)
 
-- OSMO 6.3.1（开源版，chart `service` / `backend-operator` 1.3.1）
-- AKS 部署在 westus3，GPU 用 T4（`Standard_NC*as_T4_v3`），基础设施用 Terraform 管理
-- AKS API 第一阶段走公网（限制来源 IP）；PostgreSQL、Redis、Blob、Key Vault、ACR 走私网
+- OSMO 6.3.1, the open-source edition, deployed with the `service` and `backend-operator` charts, version 1.3.1
+- AKS in West US 3 with NVIDIA T4 GPUs (`Standard_NC*as_T4_v3`), provisioned with Terraform
+- The AKS API server has a public endpoint that only accepts admin IPs. PostgreSQL, Redis, Blob storage and Key Vault are reached over private networking. Phase 1 has no container registry.

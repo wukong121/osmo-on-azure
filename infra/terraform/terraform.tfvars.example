@@ -1,0 +1,18 @@
+# 复制为 terraform.tfvars 后修改。terraform.tfvars 已被 .gitignore 忽略。
+
+subscription_id = "00000000-0000-0000-0000-000000000000"
+
+# 部署机 / 管理员的公网出口 IP，可用 `curl -s ifconfig.me` 查询
+admin_ip_cidrs = ["203.0.113.10/32"]
+
+# location    = "westus3"
+# 命名：<缩写>-<workload>-<environment>-<region>，见 naming.tf
+# workload    = "osmo"
+# environment = "poc"
+
+# GPU 节点池（需要订阅有 Standard NCASv3_T4 Family vCPUs 配额）
+# gpu_node_vm_size   = "Standard_NC8as_T4_v3"
+# gpu_node_min_count = 0
+# gpu_node_max_count = 2
+# 配额未到位时可先关闭 GPU 节点池，只部署控制面和数据组件
+# gpu_node_pool_enabled = false

@@ -122,7 +122,7 @@ Isaac Sim 的 RTX 渲染和相机类作业在 T4 上能不能跑还不确定，�
 - [microsoft/physical-ai-toolchain](https://github.com/microsoft/physical-ai-toolchain)：微软的 Physical AI 工具链参考实现
 - [NVIDIA/OSMO — Azure Terraform 示例](https://github.com/NVIDIA/OSMO/blob/main/deployments/terraform/azure/example/README.md)：OSMO 官方的 Azure Terraform 部署示例
 - 研读结论：[reference-repos.md](reference-repos.md)
-- 架构图：[部署架构](images/osmo_deployment_architecture.svg)、[工作流时序](images/osmo_workflow_sequence.svg)
+- 架构图：[Azure 部署架构（PoC 第一阶段）](images/azure-architecture.svg)、[OSMO 部署架构](images/osmo_deployment_architecture.svg)、[OSMO 工作流时序](images/osmo_workflow_sequence.svg)
 
 ## 6. 待确认事项
 
@@ -139,4 +139,6 @@ Isaac Sim 的 RTX 渲染和相机类作业在 T4 上能不能跑还不确定，�
 - [x] OSMO 版本 → 6.3.1（6.4 还没有发布 chart 和镜像）
 - [x] T4 可行性 → Isaac Lab 3.0 Newton headless、MuJoCo、Gazebo 可行；Isaac Sim 渲染不确定（见 [t4-feasibility.md](t4-feasibility.md)）
 - [ ] 拿到 T4 机器后按 t4-feasibility.md 的清单实测
+- [ ] **申请 T4 配额**：测试订阅 westus3 的 `Standard NCASv3_T4 Family vCPUs` 当前为 0（2026-11-05 查询），建议至少 16 vCPU
+- [x] Terraform 第一版 → `infra/terraform/`（validate 和 plan 已通过，尚未 apply）
 - [x] PostgreSQL TLS → 可以开启
