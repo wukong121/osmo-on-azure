@@ -6,7 +6,9 @@ Deploy [NVIDIA OSMO](https://github.com/NVIDIA/OSMO) on Azure to give embodied-A
 
 ## Architecture (PoC phase 1)
 
-![OSMO on Azure architecture](docs/images/azure-architecture.svg)
+![OSMO on Azure architecture](docs/images/azure-architecture.png)
+
+_Edges: green = private (VNet / Private Link) · orange dashed = public endpoint restricted to admin IPs · grey = outbound via NAT · blue dotted = identity / monitoring._
 
 ## Documents
 

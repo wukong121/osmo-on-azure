@@ -122,7 +122,7 @@ Isaac Sim 的 RTX 渲染和相机类作业在 T4 上能不能跑还不确定，�
 - [microsoft/physical-ai-toolchain](https://github.com/microsoft/physical-ai-toolchain)：微软的 Physical AI 工具链参考实现
 - [NVIDIA/OSMO — Azure Terraform 示例](https://github.com/NVIDIA/OSMO/blob/main/deployments/terraform/azure/example/README.md)：OSMO 官方的 Azure Terraform 部署示例
 - 研读结论：[reference-repos.md](reference-repos.md)
-- 架构图：[Azure 部署架构（PoC 第一阶段）](images/azure-architecture.svg)、[OSMO 部署架构](images/osmo_deployment_architecture.svg)、[OSMO 工作流时序](images/osmo_workflow_sequence.svg)
+- 架构图：[Azure 部署架构（PoC 第一阶段）](images/azure-architecture.png)、[OSMO 部署架构](images/osmo_deployment_architecture.svg)、[OSMO 工作流时序](images/osmo_workflow_sequence.svg)
 
 ## 6. 待确认事项
 
