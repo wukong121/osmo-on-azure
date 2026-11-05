@@ -6,7 +6,9 @@ PoC 第一阶段使用的 Azure 基础设施，为 OSMO 6.3.1 提供运行环境
 
 ## 架构
 
-![OSMO on Azure 架构](../../docs/images/azure-architecture.svg)
+![OSMO on Azure 架构](../../docs/images/azure-architecture.png)
+
+_连线说明：绿色 = 私网（VNet / Private Link）· 橙色虚线 = 仅放行管理 IP 的公网入口 · 灰色 = 经 NAT 出网 · 蓝色点线 = 身份 / 监控。_
 
 | 组件 | 访问方式 | 说明 |
 |---|---|---|
