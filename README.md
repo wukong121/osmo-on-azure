@@ -19,6 +19,7 @@ _Edges: green = private (VNet / Private Link) · orange dashed = public endpoint
 | [docs/t4-feasibility.md](docs/t4-feasibility.md) (Chinese) | Feasibility of running Isaac Lab / Isaac Sim / MuJoCo / Gazebo on T4 GPUs |
 | [docs/images/](docs/images/) | Azure architecture, OSMO deployment architecture, OSMO workflow sequence |
 | [infra/terraform/](infra/terraform/README.md) | Azure infrastructure: AKS, T4 GPU node pool, private data services |
+| [deploy/](deploy/README.md) | OSMO 6.3.1 deployment with Helm (GPU Operator, KAI, OSMO service, backend operator) and phase-1 acceptance workflows |
 
 ## Current technology choices (PoC phase 1)
 

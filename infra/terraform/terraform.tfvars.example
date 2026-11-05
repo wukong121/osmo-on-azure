@@ -10,8 +10,10 @@ admin_ip_cidrs = ["203.0.113.10/32"]
 # workload    = "osmo"
 # environment = "poc"
 
-# GPU 节点池（需要订阅有 Standard NCASv3_T4 Family vCPUs 配额）
+# GPU 节点池。默认 Spot（使用 Low-priority vCPUs 配额）；改为 Regular 需要 Standard NCASv3_T4 Family vCPUs 配额
+# gpu_node_priority  = "Spot"
 # gpu_node_vm_size   = "Standard_NC8as_T4_v3"
+# OSMO 不接受提交到没有节点的平台：测试期间设为 1，闲置时设为 0 以节省费用
 # gpu_node_min_count = 0
 # gpu_node_max_count = 2
 # 配额未到位时可先关闭 GPU 节点池，只部署控制面和数据组件

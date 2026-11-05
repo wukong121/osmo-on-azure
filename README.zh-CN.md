@@ -19,6 +19,7 @@ _连线说明：绿色 = 私网（VNet / Private Link）· 橙色虚线 = 仅放
 | [docs/t4-feasibility.md](docs/t4-feasibility.md) | T4 GPU 运行 Isaac Lab / Isaac Sim / MuJoCo / Gazebo 的可行性评估 |
 | [docs/images/](docs/images/) | Azure 部署架构图、OSMO 部署架构图、工作流时序图 |
 | [infra/terraform/](infra/terraform/README.zh-CN.md) | Azure 基础设施（AKS、T4 GPU 池、私网数据组件） |
+| [deploy/](deploy/README.zh-CN.md) | OSMO 6.3.1 的 Helm 部署（GPU Operator、KAI、OSMO service、backend operator）和第一阶段验收工作流 |
 
 ## 当前技术选型（PoC 第一阶段）
 

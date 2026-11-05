@@ -140,7 +140,7 @@ variable "kubernetes_version" {
 variable "system_node_vm_size" {
   description = "系统节点池 VM 规格（同时承载 OSMO 控制面服务，OSMO 要求 >= 8 核 / 32 GB）"
   type        = string
-  default     = "Standard_D8s_v5"
+  default     = "Standard_D8s_v4"
 }
 
 variable "system_node_min_count" {
@@ -179,6 +179,21 @@ variable "gpu_node_max_count" {
   default     = 2
 }
 
+variable "gpu_node_priority" {
+  description = <<-EOT
+    GPU 节点池优先级：Spot 或 Regular。
+    - Spot 使用 "Total Regional Low-priority vCPUs" 配额，价格约为按需的 30%，但可能被回收、容量不保证
+    - Regular 使用 "Standard NCASv3_T4 Family vCPUs" 配额
+  EOT
+  type        = string
+  default     = "Spot"
+
+  validation {
+    condition     = contains(["Spot", "Regular"], var.gpu_node_priority)
+    error_message = "gpu_node_priority 只能是 Spot 或 Regular。"
+  }
+}
+
 variable "gpu_node_os_sku" {
   description = "GPU 节点 OS SKU"
   type        = string
@@ -204,7 +219,7 @@ variable "postgres_version" {
 variable "postgres_sku_name" {
   description = "PostgreSQL Flexible Server SKU（OSMO 最低要求 2 核 / 4 GB）"
   type        = string
-  default     = "B_Standard_B2ms"
+  default     = "GP_Standard_D2ds_v4"
 }
 
 variable "postgres_storage_mb" {
@@ -257,6 +272,7 @@ variable "osmo_workload_identity_subjects" {
     - service chart：global.serviceAccountName = "osmo"
     - backend-operator chart：SA 名为 "<release 名>-backend-listener/-worker"，这里假设 release 名为 osmo-operator
     - 工作流 Pod 使用 osmo-workflows 命名空间下的 osmo-workflow
+    - osmo-sas-rotator：定期生成 workflow_data 的用户委托 SAS（OSMO 6.3.1 的变通方案，见 deploy/README.md）
     部署 OSMO 时如修改了 release 名或命名空间，需同步修改这里。
   EOT
   type = map(object({
@@ -268,6 +284,7 @@ variable "osmo_workload_identity_subjects" {
     backend-listener = { namespace = "osmo-operator", service_account = "osmo-operator-backend-listener" }
     backend-worker   = { namespace = "osmo-operator", service_account = "osmo-operator-backend-worker" }
     workflow         = { namespace = "osmo-workflows", service_account = "osmo-workflow" }
+    sas-rotator      = { namespace = "osmo", service_account = "osmo-sas-rotator" }
   }
 }
 

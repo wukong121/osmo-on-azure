@@ -1,0 +1,35 @@
+# OSMO backend-operator chart values (osmo/backend-operator 1.3.1, OSMO 6.3.1).
+# Release name must be "osmo-operator": the chart names its ServiceAccounts
+# "<release>-backend-listener/-worker", which the Terraform federated credentials expect.
+global:
+  osmoImageLocation: nvcr.io/nvidia/osmo
+  osmoImageTag: "6.3.1"
+  serviceUrl: http://osmo-gateway.osmo.svc.cluster.local
+  agentNamespace: osmo-operator
+  backendNamespace: osmo-workflows
+  backendName: default
+  # Token for the backend-operator service user (role osmo-backend), created by scripts/03-osmo-backend.sh
+  loginMethod: token
+  accountTokenSecret: osmo-operator-token
+  accountTokenSecretKey: token
+  logs:
+    logLevel: INFO
+
+services:
+  backendListener:
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "512Mi"
+      limits:
+        memory: "1Gi"
+  backendWorker:
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "512Mi"
+      limits:
+        memory: "1Gi"
+
+backendTestRunner:
+  enabled: false

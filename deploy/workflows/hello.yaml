@@ -1,0 +1,22 @@
+# Phase-1 check: CPU task on the default platform (system node pool).
+# Covers: submit -> queue -> backend operator creates pod -> status -> logs -> completion.
+workflow:
+  name: poc-hello
+  timeout:
+    exec_timeout: 5m
+    queue_timeout: 10m
+  resources:
+    tiny:
+      cpu: 1
+      memory: 1Gi
+      storage: 1Gi
+  tasks:
+  - name: hello
+    image: alpine:3.20
+    resource: tiny
+    command: ["sh", "-c"]
+    args:
+    - |
+      set -e
+      echo "Hello from OSMO on Azure"
+      echo "Task ran on $(hostname) at $(date -u +%FT%TZ)"

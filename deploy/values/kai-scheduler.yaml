@@ -1,0 +1,19 @@
+# KAI Scheduler values. Chart: oci://ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler v0.14.9
+# (the KAI line paired with OSMO 6.3.x; validated by microsoft/physical-ai-toolchain).
+global:
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+    - key: kubernetes.azure.com/scalesetpriority
+      operator: Equal
+      value: spot
+      effect: NoSchedule
+
+# Do not inject runtimeClassName "nvidia" into pods that declare a GPU resource.
+# OSMO's default pod template sets nvidia.com/gpu: {{USER_GPU}} on every task, so CPU-only tasks
+# (USER_GPU=0) on the system pool would get runtimeClassName nvidia and fail with
+# "no runtime for nvidia is configured". GPU nodes use nvidia as the containerd default runtime
+# instead (see gpu-operator.yaml). Matches NVIDIA/OSMO deployments/charts/osmo/examples/kai-values.yaml.
+admission:
+  gpuPodRuntimeClassName: ""

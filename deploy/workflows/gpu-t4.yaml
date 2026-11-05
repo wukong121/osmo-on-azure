@@ -1,0 +1,26 @@
+# Phase-1 check: GPU task on the t4 platform (Spot T4 node pool, scaled from zero).
+# The first run waits for node scale-up and GPU driver installation (~10-15 min).
+workflow:
+  name: poc-gpu-t4
+  timeout:
+    exec_timeout: 10m
+    queue_timeout: 30m
+  resources:
+    one_t4:
+      platform: t4
+      gpu: 1
+      cpu: 2
+      memory: 8Gi
+      storage: 10Gi
+  tasks:
+  - name: nvidia-smi
+    image: nvcr.io/nvidia/cuda:12.4.1-base-ubuntu22.04
+    resource: one_t4
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -e
+      nvidia-smi
+      nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
+      nvidia-smi --query-gpu=name --format=csv,noheader | grep -q "T4"
+      echo "T4 visible to the workflow container"

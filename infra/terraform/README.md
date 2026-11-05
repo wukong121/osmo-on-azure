@@ -14,10 +14,10 @@ _Edges: green = private (VNet / Private Link) · orange dashed = public endpoint
 |---|---|---|
 | AKS API server | Public endpoint with authorized IP ranges | Local accounts are disabled; sign-in uses Entra ID. The deployer gets the cluster admin role. |
 | PostgreSQL Flexible Server 16 | Private only (VNet-injected) | `require_secure_transport=on`. The hstore, uuid-ossp and pg_stat_statements extensions are allow-listed. |
-| Azure Managed Redis | Private only (private endpoint) | EnterpriseCluster clustering policy, TLS on port 10000 |
-| Blob storage | Private only (private endpoint) | Shared Key is disabled. OSMO uses Workload Identity. |
-| Key Vault | Private endpoint, plus a public endpoint open only to admin IPs | Holds the PostgreSQL password and Redis key. Terraform needs the public endpoint to write the secrets. |
-| GPU node pool | — | NVIDIA T4, Regular priority, scales to zero. `gpu_driver=None`: the GPU Operator installs the driver. |
+| Azure Managed Redis | Private only (private endpoint) | `NoCluster` clustering policy (OSMO runs multi-key pipelines; see deploy/README.md), TLS on port 10000 |
+| Blob storage | Private only (private endpoint) | Shared Key is disabled. OSMO uses Workload Identity, plus a user delegation SAS for workflow data on OSMO 6.3.1. |
+| Key Vault | Private only (private endpoint) | Reserved for in-cluster secret management (Key Vault CSI). Terraform does not write secrets into it; see Notes. |
+| GPU node pool | — | NVIDIA T4, **Spot** priority by default (Regular is available), can scale to zero, but keep `gpu_node_min_count = 1` while testing because OSMO rejects submissions to an empty platform. `gpu_driver=None`: the GPU Operator installs the driver. |
 
 Azure Container Registry is out of scope for phase 1. Images are pulled directly from nvcr.io.
 
@@ -58,7 +58,6 @@ Default names (`<sfx>` is the unique suffix):
 Some names are fixed and do not follow these variables:
 - The `privatelink.*` private DNS zones (names set by Azure)
 - The DCR association `ContainerInsightsExtension` (Container Insights convention)
-- The Key Vault secrets `postgres-admin-password` and `redis-primary-key`
 - The federated credentials `fic-<key>`
 
 During `terraform plan`, `naming.tf` checks the length and allowed characters of the Key Vault, storage account and other constrained names.
@@ -67,13 +66,18 @@ During `terraform plan`, `naming.tf` checks the length and allowed characters of
 
 - Terraform 1.9 or later, and the Azure CLI signed in (`az login`)
 - Subscription permissions: Owner, or Contributor plus User Access Administrator, because the module creates role assignments
-- **GPU quota.** The `Standard NCASv3_T4 Family vCPUs` quota must cover `gpu_node_max_count × vCPUs per node` (NC8as has 8 vCPUs). Check it with:
+- **GPU quota.** The quota must cover `gpu_node_max_count × vCPUs per node` (NC8as has 8 vCPUs).
+  - Spot (default) uses the `Total Regional Low-priority vCPUs` quota.
+  - Regular uses the `Standard NCASv3_T4 Family vCPUs` quota.
+
+  Check it with:
 
   ```bash
-  az vm list-usage -l westus3 -o table | grep -i NCAS
+  az vm list-usage -l westus3 -o table | grep -iE "NCAS|Low-priority"
   ```
 
   The GPU node pool is still created when the quota is 0, because its minimum size is 0, but it cannot scale out.
+- **Spot trade-offs.** Spot costs about 30% of the on-demand price. In West US 3, NC8as_T4 costs $0.21/h on Spot and $0.75/h on demand (November 2026 prices). Nodes can be evicted and capacity is not guaranteed, which is acceptable for a PoC. Spot nodes carry the taint `kubernetes.azure.com/scalesetpriority=spot:NoSchedule`, so the GPU Operator and OSMO workflow pods must tolerate it.
 - [kubelogin](https://azure.github.io/kubelogin/) to access the cluster. `az aks install-cli` installs it.
 
 ## Deploy
@@ -105,13 +109,15 @@ kubectl get nodes
 | `postgres_fqdn` / `postgres_db_name` / `postgres_admin_username` | OSMO database connection |
 | `redis_hostname` / `redis_port` | OSMO Redis connection (TLS) |
 | `storage_account_name` / `storage_container_name` / `storage_blob_endpoint` | Storage for OSMO workflow data, logs and artifacts |
-| `key_vault_name` / `key_vault_secret_names` | Retrieving the PostgreSQL password and Redis key through the Key Vault CSI driver |
+| `postgres_admin_password` / `redis_primary_key` | Sensitive. Read by `deploy/scripts/02-osmo-service.sh` and stored as Kubernetes Secrets |
+| `key_vault_name` / `key_vault_uri` | Private Key Vault for later Key Vault CSI integration |
 
 ## Notes
 
 - **Workload Identity service account names.** The defaults in `osmo_workload_identity_subjects` match the OSMO 6.3.1 chart defaults: `osmo` for the service chart, and a backend-operator release named `osmo-operator`. If you change the release names or namespaces when deploying OSMO, update this variable and apply again.
-- **Key Vault public endpoint.** Writing secrets is a data-plane operation, so the vault accepts public traffic from `admin_ip_cidrs`. After deployment you can set `public_network_access_enabled` to `false` and apply. From then on, changing secrets requires a jump host inside the VNet.
-- **Admin IP changes.** If your egress IP changes, update `admin_ip_cidrs` and apply. Until you do, you cannot reach the AKS API or Key Vault.
+- **Key Vault is private-only.** Some subscriptions, such as MCAPS, have a policy that forces Key Vault public network access off. Writing secrets is a data-plane operation, so Terraform cannot do it from outside the VNet. The PostgreSQL password and Redis key are therefore exposed as sensitive outputs instead.
+- **Subscription policies.** Policies can also add `ip_tags` to public IPs. The NAT public IP ignores `ip_tags` changes so that it is not recreated and the egress IP does not change. Defender for Cloud may also enable Microsoft Defender on AKS; the cluster ignores `microsoft_defender` because the subscription manages it.
+- **Admin IP changes.** If your egress IP changes, update `admin_ip_cidrs` and apply. Until you do, you cannot reach the AKS API.
 - **Sensitive values.** The PostgreSQL password and the Redis key are stored in the Terraform state. The PoC uses local state, so never commit state files. Production should use an encrypted remote backend, such as Azure Storage.
 - **Teardown.** `terraform destroy` removes every resource and purges the Key Vault.
 

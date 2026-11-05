@@ -80,7 +80,7 @@ NVIDIA OSMO 是面向 Physical AI / 机器人开发的云原生工作流编排�
 | 计算 | Azure Kubernetes Service（AKS）+ GPU 节点池 |
 | IaC 工具 | **Terraform** |
 | Azure 区域 | **West US 3（westus3）** |
-| GPU | **NVIDIA T4（`Standard_NC*as_T4_v3` 系列）**。测试订阅在 westus3 只能开出这个系列。Isaac 类作业建议用 NC8as / NC16as，NC4as 只有 4 核 / 28 GB，偏紧 |
+| GPU | **NVIDIA T4（`Standard_NC*as_T4_v3` 系列），PoC 使用 Spot 优先级**。测试订阅在 westus3 只能开出这个系列。Isaac 类作业建议用 NC8as / NC16as，NC4as 只有 4 核 / 28 GB，偏紧 |
 | OSMO 版本 | **6.3.1**（最新正式发布版）：chart 用 `service` 和 `backend-operator` 1.3.1。6.4 目前只有 git tag，还没有发布 chart 和镜像（详见 [reference-repos.md](reference-repos.md)） |
 | PostgreSQL TLS | 保持开启（`require_secure_transport=on`），已对照 6.3.1 源码确认兼容 |
 | 网络 | AKS API Server 第一阶段可以走公网（需要限制来源 IP）。**数据相关组件**（PostgreSQL、Redis、Blob、Key Vault、ACR）**必须走私网**（Private Endpoint / VNet 注入，并关闭公网访问） |
@@ -139,6 +139,10 @@ Isaac Sim 的 RTX 渲染和相机类作业在 T4 上能不能跑还不确定，�
 - [x] OSMO 版本 → 6.3.1（6.4 还没有发布 chart 和镜像）
 - [x] T4 可行性 → Isaac Lab 3.0 Newton headless、MuJoCo、Gazebo 可行；Isaac Sim 渲染不确定（见 [t4-feasibility.md](t4-feasibility.md)）
 - [ ] 拿到 T4 机器后按 t4-feasibility.md 的清单实测
-- [ ] **申请 T4 配额**：测试订阅 westus3 的 `Standard NCASv3_T4 Family vCPUs` 当前为 0（2026-11-05 查询），建议至少 16 vCPU
-- [x] Terraform 第一版 → `infra/terraform/`（validate 和 plan 已通过，尚未 apply）
+- [x] T4 配额 → 测试订阅按需 T4 配额为 0，PoC 改用 **Spot** T4（Low-priority 配额 100 vCPU）；客户正式环境再评估按需配额
+- [x] Terraform 第一版 → `infra/terraform/`，已在测试订阅 apply（2026-11-05）
+- [x] OSMO 6.3.1 部署 → `deploy/`；**第一阶段三项验收全部通过**（hello / 存储往返 / T4 GPU，2026-11-05）。部署中发现的 6 个问题和修复见 `deploy/README.zh-CN.md`
+- [ ] 接入 Entra ID（oauth2-proxy + JWT provider），开放 Web UI
+- [ ] Isaac Lab / MuJoCo / Gazebo 示例作业
+- [ ] OSMO 6.4 发布后升级，去掉 workflow_data SAS 轮换器
 - [x] PostgreSQL TLS → 可以开启

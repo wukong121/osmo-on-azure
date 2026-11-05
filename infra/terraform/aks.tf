@@ -103,6 +103,8 @@ resource "azurerm_kubernetes_cluster" "main" {
   lifecycle {
     ignore_changes = [
       default_node_pool[0].node_count,
+      # 订阅策略（Defender for Cloud）会自动启用 Defender，不由本模块管理
+      microsoft_defender,
     ]
   }
 
@@ -125,8 +127,12 @@ resource "azurerm_role_assignment" "deployer_aks_admin" {
 # - gpu_driver = "None"：不使用 AKS 自带驱动，由 GPU Operator 安装 595 分支驱动
 #   （Isaac Lab 3.0 要求 >= 595.58.03，见 docs/t4-feasibility.md）
 # - 使用 NVIDIA 标准 taint，GPU Operator / KAI 默认容忍
-# - Regular 优先级，避免 Spot 回收打断作业
+# - 默认 Spot 优先级（使用低优先级配额，成本约为按需的 30%），可切换为 Regular
 ################################################################################
+
+locals {
+  gpu_is_spot = var.gpu_node_priority == "Spot"
+}
 
 resource "azurerm_kubernetes_cluster_node_pool" "gpu" {
   count = var.gpu_node_pool_enabled ? 1 : 0
@@ -144,14 +150,27 @@ resource "azurerm_kubernetes_cluster_node_pool" "gpu" {
   max_count            = var.gpu_node_max_count
 
   gpu_driver = "None"
-  priority   = "Regular"
 
-  node_taints = ["nvidia.com/gpu=present:NoSchedule"]
-  node_labels = {
-    "nvidia.com/gpu" = "present"
-    "osmo/node-type" = "gpu"
-    "osmo/gpu-model" = local.names.np_gpu
-  }
+  # Spot：被回收时直接删除节点（不保留磁盘），最高价 -1 表示按当前 Spot 价格、不因价格被回收
+  priority        = var.gpu_node_priority
+  eviction_policy = local.gpu_is_spot ? "Delete" : null
+  spot_max_price  = local.gpu_is_spot ? -1 : null
+
+  # AKS 会给 Spot 节点自动添加 scalesetpriority taint，这里显式声明以避免 plan 漂移。
+  # GPU Operator 和 OSMO 工作流 Pod 需要同时容忍这两个 taint。
+  node_taints = concat(
+    ["nvidia.com/gpu=present:NoSchedule"],
+    local.gpu_is_spot ? ["kubernetes.azure.com/scalesetpriority=spot:NoSchedule"] : [],
+  )
+  # Spot 池需同时声明 AKS 自动添加的 scalesetpriority label（provider 文档要求），避免 plan 漂移
+  node_labels = merge(
+    {
+      "nvidia.com/gpu" = "present"
+      "osmo/node-type" = "gpu"
+      "osmo/gpu-model" = "t4"
+    },
+    local.gpu_is_spot ? { "kubernetes.azure.com/scalesetpriority" = "spot" } : {},
+  )
 
   tags = local.tags
 

@@ -73,10 +73,14 @@ output "key_vault_uri" {
   value = azurerm_key_vault.main.vault_uri
 }
 
-output "key_vault_secret_names" {
-  description = "Key Vault 中的 secret 名称"
-  value = {
-    postgres_password = azurerm_key_vault_secret.postgres_password.name
-    redis_key         = azurerm_key_vault_secret.redis_key.name
-  }
+output "postgres_admin_password" {
+  description = "PostgreSQL 管理员密码（敏感，部署脚本读取后写入 K8s Secret）"
+  value       = random_password.postgres.result
+  sensitive   = true
+}
+
+output "redis_primary_key" {
+  description = "Managed Redis 访问密钥（敏感，部署脚本读取后写入 K8s Secret）"
+  value       = azurerm_managed_redis.main.default_database[0].primary_access_key
+  sensitive   = true
 }

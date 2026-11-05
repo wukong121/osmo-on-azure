@@ -54,6 +54,12 @@ resource "azurerm_public_ip" "nat" {
   allocation_method   = "Static"
   sku                 = "Standard"
   tags                = local.tags
+
+  lifecycle {
+    # 部分订阅（如 MCAPS）的策略会自动添加 ip_tags（FirstPartyUsage），
+    # ip_tags 变更会强制重建公网 IP，导致出口 IP 变化
+    ignore_changes = [ip_tags]
+  }
 }
 
 resource "azurerm_nat_gateway" "main" {

@@ -2,8 +2,11 @@
 # Azure Managed Redis（OSMO 要求 Redis 7+）
 #
 # - 关闭公网访问，仅通过私有终结点访问
-# - clustering_policy 必须为 EnterpriseCluster：OSMO 使用非集群模式客户端，
-#   OSSCluster 会返回 MOVED 导致提交失败；该属性创建后不可修改
+# - clustering_policy 使用 NoCluster（单分片，适用于 25 GB 及以下的 SKU）：
+#   OSMO 使用非集群模式客户端，且会在 pipeline 中执行多 key 命令。
+#   OSSCluster 会返回 MOVED；EnterpriseCluster 在多分片 SKU 上会返回
+#   ClusterCrossSlotError（Keys in request don't hash to the same slot）。
+#   修改该属性会重建 database，数据丢失
 # - 必须启用 access key 认证，否则 Terraform 拿不到密钥
 ################################################################################
 
@@ -17,7 +20,7 @@ resource "azurerm_managed_redis" "main" {
 
   default_database {
     client_protocol                    = "Encrypted"
-    clustering_policy                  = "EnterpriseCluster"
+    clustering_policy                  = "NoCluster"
     eviction_policy                    = "VolatileLRU"
     access_keys_authentication_enabled = true
   }

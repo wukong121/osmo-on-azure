@@ -1,0 +1,170 @@
+# Workflow-data SAS rotator — temporary workaround for OSMO 6.3.1.
+#
+# Why: in OSMO 6.3.1, osmo-ctrl inside workflow pods crashes (KeyError 'access_key_id') when the
+# workflow_data credential has no keys, so Workload Identity cannot be used for task artifacts.
+# The fix is in OSMO 6.4 (src/lib/data/storage/credentials/credentials.py). Storage account keys are
+# not an option either: Shared Key is disabled (and enforced off by policy in some subscriptions).
+#
+# What: every 3 days, generate a 7-day container-scoped *user delegation* SAS (signed with Entra ID via
+# Workload Identity, no account key), store it as the OSMO static credential Secret
+# osmo-workflow-data-cred, and restart the OSMO pods that load it.
+#
+# Remove this file (and the secretRefs/secretName values) after upgrading to OSMO 6.4.
+#
+# Rendered by deploy/scripts/02-osmo-service.sh with envsubst:
+#   ${OSMO_CLIENT_ID} ${STORAGE_ACCOUNT} ${STORAGE_CONTAINER}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: osmo-sas-rotator
+  namespace: osmo
+  annotations:
+    azure.workload.identity/client-id: "${OSMO_CLIENT_ID}"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: osmo-sas-rotator
+  namespace: osmo
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["osmo-workflow-data-cred"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["osmo-service", "osmo-worker", "osmo-agent", "osmo-logger", "osmo-router", "osmo-delayed-job-monitor"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: osmo-sas-rotator
+  namespace: osmo
+subjects:
+  - kind: ServiceAccount
+    name: osmo-sas-rotator
+    namespace: osmo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: osmo-sas-rotator
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: osmo-sas-rotator
+  namespace: osmo
+data:
+  rotate.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+    az login --service-principal -u "$AZURE_CLIENT_ID" -t "$AZURE_TENANT_ID" \
+      --federated-token "$(cat "$AZURE_FEDERATED_TOKEN_FILE")" --allow-no-subscriptions -o none
+    # User delegation SAS lifetime is capped at 7 days
+    expiry="$(date -u -d '+6 days 23 hours' +%Y-%m-%dT%H:%MZ)"
+    sas="$(az storage container generate-sas --account-name "$STORAGE_ACCOUNT" --name "$STORAGE_CONTAINER" \
+      --as-user --auth-mode login --permissions racwdl --https-only --expiry "$expiry" -o tsv)"
+    export CONN_STR="BlobEndpoint=https://${STORAGE_ACCOUNT}.blob.core.windows.net/;SharedAccessSignature=${sas}"
+    export SAS_EXPIRY="$expiry"
+    python3 /scripts/update_k8s.py
+  update_k8s.py: |
+    """Write the OSMO static credential Secret and restart the OSMO pods that load it."""
+    import base64, datetime, json, os, ssl, urllib.error, urllib.request
+
+    SA = '/var/run/secrets/kubernetes.io/serviceaccount'
+    NS = open(f'{SA}/namespace').read().strip()
+    TOKEN = open(f'{SA}/token').read().strip()
+    CTX = ssl.create_default_context(cafile=f'{SA}/ca.crt')
+    API = 'https://kubernetes.default.svc'
+    SECRET = 'osmo-workflow-data-cred'
+    DEPLOYMENTS = ['osmo-service', 'osmo-worker', 'osmo-agent', 'osmo-logger',
+                   'osmo-router', 'osmo-delayed-job-monitor']
+
+    def call(method, path, body=None, ctype='application/json'):
+        req = urllib.request.Request(API + path, method=method,
+                                     data=json.dumps(body).encode() if body is not None else None,
+                                     headers={'Authorization': f'Bearer {TOKEN}', 'Content-Type': ctype})
+        return urllib.request.urlopen(req, context=CTX)
+
+    b64 = lambda s: base64.b64encode(s.encode()).decode()
+    account = os.environ['STORAGE_ACCOUNT']
+    secret = {
+        'apiVersion': 'v1', 'kind': 'Secret',
+        'metadata': {'name': SECRET, 'namespace': NS,
+                     'annotations': {'osmo-on-azure/sas-expiry': os.environ['SAS_EXPIRY']}},
+        'type': 'Opaque',
+        'data': {
+            'endpoint': b64(f"azure://{account}/{os.environ['STORAGE_CONTAINER']}/workflows/data"),
+            'access_key_id': b64(account),
+            'access_key': b64(os.environ['CONN_STR']),
+        },
+    }
+    try:
+        call('PUT', f'/api/v1/namespaces/{NS}/secrets/{SECRET}', secret)
+        print(f'Updated Secret {SECRET} (SAS expires {os.environ["SAS_EXPIRY"]})')
+    except urllib.error.HTTPError as err:
+        if err.code != 404:
+            raise
+        call('POST', f'/api/v1/namespaces/{NS}/secrets', secret)
+        print(f'Created Secret {SECRET} (SAS expires {os.environ["SAS_EXPIRY"]})')
+
+    if os.environ.get('RESTART_OSMO', 'true') == 'true':
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        patch = {'spec': {'template': {'metadata': {'annotations': {'kubectl.kubernetes.io/restartedAt': now}}}}}
+        for name in DEPLOYMENTS:
+            try:
+                call('PATCH', f'/apis/apps/v1/namespaces/{NS}/deployments/{name}', patch,
+                     'application/strategic-merge-patch+json')
+                print(f'Restarted deployment {name}')
+            except urllib.error.HTTPError as err:
+                if err.code != 404:
+                    raise
+                print(f'Deployment {name} not found yet; skipped')
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: osmo-sas-rotator
+  namespace: osmo
+spec:
+  # Every 3 days; each SAS is valid for ~7 days, leaving room for one failed run
+  schedule: "17 3 */3 * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      template:
+        metadata:
+          labels:
+            azure.workload.identity/use: "true"
+        spec:
+          serviceAccountName: osmo-sas-rotator
+          restartPolicy: OnFailure
+          containers:
+            - name: rotate
+              image: mcr.microsoft.com/azure-cli:2.92.0
+              command: ["bash", "/scripts/rotate.sh"]
+              env:
+                - name: STORAGE_ACCOUNT
+                  value: "${STORAGE_ACCOUNT}"
+                - name: STORAGE_CONTAINER
+                  value: "${STORAGE_CONTAINER}"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 256Mi
+                limits:
+                  memory: 512Mi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+          volumes:
+            - name: scripts
+              configMap:
+                name: osmo-sas-rotator
