@@ -1,0 +1,36 @@
+# Phase-1 check: task outputs are uploaded to Blob (private endpoint, Workload Identity)
+# and downloaded as inputs by the next task.
+workflow:
+  name: poc-storage-roundtrip
+  timeout:
+    exec_timeout: 10m
+    queue_timeout: 10m
+  resources:
+    tiny:
+      cpu: 1
+      memory: 1Gi
+      storage: 1Gi
+  tasks:
+  - name: produce
+    image: alpine:3.20
+    resource: tiny
+    command: ["sh", "-c"]
+    args:
+    - |
+      set -e
+      mkdir -p {{output}}
+      echo "OSMO object storage round trip" > {{output}}/marker.txt
+      echo "Marker written; osmo-ctrl uploads it to Blob"
+  - name: consume
+    image: alpine:3.20
+    resource: tiny
+    command: ["sh", "-c"]
+    args:
+    - |
+      set -e
+      test "$(cat {{input:0}}/marker.txt)" = "OSMO object storage round trip"
+      mkdir -p {{output}}
+      cp {{input:0}}/marker.txt {{output}}/verified.txt
+      echo "Object storage round trip verified"
+    inputs:
+    - task: produce

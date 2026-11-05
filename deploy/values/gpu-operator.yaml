@@ -1,0 +1,67 @@
+# NVIDIA GPU Operator values for AKS T4 Spot node pools.
+# Chart: nvidia/gpu-operator v26.7.2 (default driver 595.91.07, required by Isaac Lab 3.0).
+#
+# - The GPU node pool uses gpu_driver=None, so the operator installs the driver.
+# - GPU nodes carry two taints: nvidia.com/gpu (ours) and the Spot taint added by AKS.
+#   Every node-level DaemonSet must tolerate both.
+
+# Shared tolerations for operator-managed DaemonSets
+daemonsets:
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+    - key: kubernetes.azure.com/scalesetpriority
+      operator: Equal
+      value: spot
+      effect: NoSchedule
+
+driver:
+  enabled: true
+  # Default for v26.7.2 is 595.91.07; pinned here so chart upgrades do not change it silently.
+  version: "595.91.07"
+  # Turing (T4) supports both open and proprietary kernel modules; let the operator decide.
+  kernelModuleType: auto
+
+toolkit:
+  enabled: true
+  # Use the toolkit version that ships with the operator (v1.20.1 for v26.7.2). Do NOT pin the
+  # older v1.17.8 used by microsoft/physical-ai-toolchain (paired with operator v26.3.x): with
+  # v26.7.x, containers fail with "No help topic for 'apply-cuda-memory-limits'".
+  # Known AKS issue: on Ubuntu 24.04 / containerd 2.x nodes the toolkit can write a containerd
+  # drop-in newer than AKS's root config and the node goes NotReady. GPU pools therefore use
+  # os_sku = Ubuntu2204 (see infra/terraform), where this combination is validated.
+  env:
+    # Make nvidia the default containerd runtime on GPU nodes, so GPU pods work without a
+    # runtimeClassName (KAI's runtimeClass injection is disabled, see kai-scheduler.yaml).
+    - name: CONTAINERD_SET_AS_DEFAULT
+      value: "true"
+
+devicePlugin:
+  enabled: true
+
+dcgmExporter:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+
+# T4 has no MIG
+mig:
+  strategy: none
+migManager:
+  enabled: false
+
+node-feature-discovery:
+  worker:
+    tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Equal
+        value: ""
+        effect: NoSchedule
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+      - key: kubernetes.azure.com/scalesetpriority
+        operator: Equal
+        value: spot
+        effect: NoSchedule

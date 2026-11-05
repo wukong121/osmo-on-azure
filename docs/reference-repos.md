@@ -60,7 +60,7 @@
 | NSG | AKS 子网放行了任意来源的 443 | ⚠️ 需要按实际访问方式收紧 |
 
 注意事项：
-- Redis 必须用 `EnterpriseCluster`，不能用 `OSSCluster`，否则会出现 `MOVED` 错误。这个设置创建后不能修改。
+- 官方示例说 Redis 必须用 `EnterpriseCluster`，不能用 `OSSCluster`，否则会出现 `MOVED` 错误。**实测更正（2026-11-05）**：在多分片的 SKU 上，`EnterpriseCluster` 仍然会因为跨 slot 的多 key pipeline 报 `ClusterCrossSlotError`。25 GB 及以下的 SKU 应该用 **`NoCluster`**。这个设置会让 database 重建。
 - 必须开启 `access_keys_authentication_enabled = true`，否则 Terraform 拿不到 key。
 
 ### 2.3 部署脚本与验证用例
@@ -120,7 +120,7 @@
 | Key Vault（RBAC 模式）存放 PG 和 Redis 密码，用 SecretProviderClass（CSI + WI）同步到集群 | `platform` 模块和 `infrastructure/setup/manifests/aks-secret-provider-class*.yaml` | 密钥管理 |
 | ACR（Premium，关闭 admin 账号），以及 `import-osmo-to-acr.sh` 镜像同步脚本 | `platform` 模块和 setup 脚本 | 私网拉取镜像，可选 |
 | OSMO 相关 SA 的 UAMI 联邦凭据 | `modules/sil/osmo-federated-credentials.tf` | Workload Identity。6.3.1 下 SA 名称可以直接沿用 |
-| AKS 上 GPU Operator 的调优经验：跳过 AKS 已装驱动的节点，toolkit 锁定 `v1.17.8` 以兼容 AKS containerd；K8s 1.35 下 GPU 池用 `Ubuntu2204` | `infrastructure/setup/values/nvidia-gpu-operator.yaml`、`docs/reference/gpu-configuration.md` | 规避坑点 |
+| AKS 上 GPU Operator 的调优经验：跳过 AKS 已装驱动的节点，toolkit 锁定 `v1.17.8` 以兼容 AKS containerd（**注意**：这个版本只适用于 operator v26.3；在 v26.7 上 GPU 容器会启动失败，要改用 chart 自带的 v1.20.1，并配合 Ubuntu 22.04 的 GPU 节点）；K8s 1.35 下 GPU 池用 `Ubuntu2204` | `infrastructure/setup/values/nvidia-gpu-operator.yaml`、`docs/reference/gpu-configuration.md` | 规避坑点 |
 | 本地冒烟 workflow（CPU 任务、GPU 任务、输入输出数据往返） | `infrastructure/local/workflows/osmo-smoke.yaml` | 参考验收用例 |
 
 ### 3.4 不适合直接复用的部分
@@ -146,3 +146,12 @@
 3. **认证**：第一阶段可以先用 dev 模式或管理员 token，把主链路跑通。接着通过 oauth2-proxy 接 Entra ID（OIDC），这一步基本就是验证时序图里的“1. 认证与授权”。
 4. **访问**：第一阶段 OSMO UI/API 先用 port-forward 访问，或者只开内部 LB。正式接入方式在网络方案里再定。
 5. **验收**：以 OSMO 自带的 `verify-hello`、`verify-gpu`、`verify-object-storage` 为基础，对照时序图的 8 个阶段逐项验证，见 `docs/background.md` 4.4 节。
+
+## 5. 部署实测补充（2026-11-05）
+
+实际部署时发现的 6 个问题和对应修复，见 [deploy/README.zh-CN.md](../deploy/README.zh-CN.md#部署中发现的问题与修复)。和本文结论直接相关的有以下几条：
+- OSMO 6.3.1 存在两个 bug：
+  - `requires_any` 只有一个 JWT provider 时，Envoy 网关无法启动。
+  - workflow_data 只配置 endpoint、不带密钥时，osmo-ctrl 在 `access_key_id` 上报 KeyError。6.4 已修复。
+- physical-ai-toolchain 的 KAI values 里没有 `admission.gpuPodRuntimeClassName: ""`，CPU 任务会被注入 nvidia runtimeClass。OSMO 官方的 kai-values 里有这一项。
+- MCAPS 类订阅的策略会强制关闭存储账号的 Shared Key，以及 Key Vault 和存储的公网访问，还会自动给公网 IP 加 `ip_tags`。

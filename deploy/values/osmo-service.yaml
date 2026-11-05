@@ -1,0 +1,226 @@
+# OSMO service chart values (osmo/service 1.3.1, OSMO 6.3.1) for the PoC.
+#
+# Environment-specific values are injected by scripts/02-osmo-service.sh from Terraform outputs:
+#   serviceAccount.annotations."azure.workload.identity/client-id"
+#   services.postgres.serviceName / services.postgres.user
+#   services.redis.serviceName
+#   services.configs.workflow.workflow_{log,app}.credential.endpoint
+#   services.configs.workflow.workflow_data.base_url
+#
+# Authentication mode (phase 1): OSMO-issued tokens only.
+#   - oauth2-proxy disabled (no external IdP yet)
+#   - authz enabled; the gateway validates OSMO-issued JWTs, client-supplied identity headers are stripped
+#   - the default admin user gets an access token from the osmo-default-admin Secret
+#   The web UI needs an IdP for browser login, so phase 1 is CLI-first.
+
+global:
+  osmoImageLocation: nvcr.io/nvidia/osmo
+  osmoImageTag: "6.3.1"
+  serviceAccountName: osmo
+  logs:
+    enabled: true
+    logLevel: INFO
+    k8sLogLevel: WARNING
+
+# Chart-managed ServiceAccount "osmo"; federated with the OSMO managed identity in Terraform
+serviceAccount:
+  create: true
+  annotations:
+    azure.workload.identity/client-id: ""
+
+services:
+  configFile:
+    enabled: true
+
+  # Azure Database for PostgreSQL Flexible Server (private, TLS enforced)
+  postgres:
+    enabled: false
+    serviceName: ""
+    port: 5432
+    db: osmo
+    user: ""
+    passwordSecretName: db-secret
+    passwordSecretKey: db-password
+
+  # Azure Managed Redis (private endpoint, TLS on port 10000)
+  redis:
+    enabled: false
+    serviceName: ""
+    port: 10000
+    tlsEnabled: true
+
+  defaultAdmin:
+    enabled: true
+    username: admin
+    passwordSecretName: osmo-default-admin
+    passwordSecretKey: password
+
+  service:
+    scaling:
+      minReplicas: 1
+      maxReplicas: 1
+    extraPodLabels:
+      azure.workload.identity/use: "true"
+  router:
+    scaling:
+      minReplicas: 1
+      maxReplicas: 1
+    extraPodLabels:
+      azure.workload.identity/use: "true"
+  worker:
+    scaling:
+      minReplicas: 1
+      maxReplicas: 1
+    extraPodLabels:
+      azure.workload.identity/use: "true"
+  logger:
+    scaling:
+      minReplicas: 1
+      maxReplicas: 1
+    extraPodLabels:
+      azure.workload.identity/use: "true"
+  agent:
+    scaling:
+      minReplicas: 1
+      maxReplicas: 1
+    extraPodLabels:
+      azure.workload.identity/use: "true"
+  delayedJobMonitor:
+    replicas: 1
+    extraPodLabels:
+      azure.workload.identity/use: "true"
+  ui:
+    enabled: true
+    apiHostname: osmo-gateway.osmo.svc.cluster.local:80
+
+  # Configuration served from a ConfigMap (CLI/API config writes return 409)
+  configs:
+    enabled: true
+    # Secrets mounted into OSMO pods for secretName references above
+    secretRefs:
+      - secretName: osmo-workflow-data-cred
+    service:
+      # Workflow pods reach the control plane through the in-cluster gateway
+      service_base_url: http://osmo-gateway.osmo.svc.cluster.local
+    workflow:
+      backend_images:
+        init: nvcr.io/nvidia/osmo/init-container:6.3.1
+        client: nvcr.io/nvidia/osmo/client:6.3.1
+      # Blob locations (azure://<account>/<container>/<path>), filled in by the deploy script.
+      # workflow_log / workflow_app: Workload Identity (no keys).
+      # workflow_data: OSMO 6.3.1 workaround — a user delegation SAS (Entra-signed, no account key)
+      # stored in Secret osmo-workflow-data-cred by the osmo-sas-rotator CronJob
+      # (deploy/manifests/workflow-data-sas-rotator.yaml). Switch back to an endpoint-only
+      # credential after upgrading to OSMO 6.4.
+      workflow_data:
+        credential:
+          secretName: osmo-workflow-data-cred
+        base_url: ""
+      workflow_log:
+        credential:
+          endpoint: ""
+      workflow_app:
+        credential:
+          endpoint: ""
+
+    podTemplates:
+      # Run workflow pods as osmo-workflow (federated with the OSMO managed identity)
+      # so osmo-ctrl can read/write Blob without keys.
+      azure_workload_identity:
+        metadata:
+          labels:
+            azure.workload.identity/use: "true"
+        spec:
+          serviceAccountName: osmo-workflow
+      # T4 Spot GPU node pool (npgput4)
+      gpu_t4:
+        spec:
+          nodeSelector:
+            kubernetes.azure.com/agentpool: npgput4
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+            - key: kubernetes.azure.com/scalesetpriority
+              operator: Equal
+              value: spot
+              effect: NoSchedule
+
+    resourceValidations:
+      gpu_required:
+        - operator: GE
+          left_operand: "{{USER_GPU}}"
+          right_operand: "1"
+          assert_message: "The t4 platform requires at least 1 GPU"
+      no_gpu:
+        - operator: EQ
+          left_operand: "{{USER_GPU}}"
+          right_operand: "0"
+          assert_message: "The default platform is CPU-only; use platform t4 for GPU tasks"
+
+    pools:
+      default:
+        description: "PoC pool: CPU tasks on system nodes, GPU tasks on T4 Spot nodes"
+        backend: default
+        default_platform: default
+        common_pod_template:
+          - default_ctrl
+          - default_user
+          - azure_workload_identity
+        platforms:
+          # CPU-only tasks on the system node pool
+          default:
+            resource_validations: [no_gpu]
+          # 1 x T4 per task. NC8as_T4_v3 = 8 vCPU / 56 GiB; leave headroom for DaemonSets and osmo-ctrl.
+          t4:
+            override_pod_template: [gpu_t4]
+            resource_validations: [gpu_required]
+            default_variables:
+              USER_GPU: 1
+              USER_CPU: 4
+              USER_MEMORY: "32Gi"
+              USER_STORAGE: "50Gi"
+
+gateway:
+  envoy:
+    scaling:
+      minReplicas: 1
+      maxReplicas: 1
+    # No public exposure in phase 1; use kubectl port-forward
+    service:
+      type: ClusterIP
+      httpsPort: null
+    internalJwks:
+      enabled: true
+      cluster: osmo-service-jwks
+      host: osmo-service
+      port: 80
+    jwt:
+      user_header: x-osmo-user
+      # NOTE: osmo/service 1.3.1 always renders the catch-all rule as "requires_any", and Envoy
+      # rejects requires_any with fewer than 2 providers (the gateway listener never starts).
+      # Until an external IdP (Entra ID) is added as the second provider, the OSMO provider is
+      # listed twice; both validate the same OSMO-issued tokens.
+      providers:
+        # OSMO-issued JWTs (default admin token, backend operator token, workflow tokens).
+        # https because gateway -> upstream TLS is enabled by default.
+        - issuer: osmo
+          audience: osmo
+          jwks_uri: https://osmo-service/api/auth/keys
+          user_claim: unique_name
+          cluster: osmo-service-jwks
+        # Placeholder second provider (see note above); replace with Entra ID in phase 2.
+        - issuer: osmo
+          audience: osmo
+          jwks_uri: https://osmo-service/api/auth/keys
+          user_claim: unique_name
+          cluster: osmo-service-jwks
+  oauth2Proxy:
+    enabled: false
+  authz:
+    enabled: true
+    scaling:
+      minReplicas: 1
+      maxReplicas: 1
+    postgres:
+      sslMode: require
