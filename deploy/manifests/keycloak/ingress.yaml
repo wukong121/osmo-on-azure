@@ -1,0 +1,26 @@
+# Public route for Keycloak under the OSMO hostname (path /auth), via Traefik.
+# Rendered with envsubst: ${OSMO_HOSTNAME}. TLS Secret keycloak/osmo-public-tls is copied from osmo/.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak
+  namespace: keycloak
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts: ["${OSMO_HOSTNAME}"]
+      secretName: osmo-public-tls
+  rules:
+    - host: "${OSMO_HOSTNAME}"
+      http:
+        paths:
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak-service
+                port:
+                  number: 8080

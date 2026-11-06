@@ -46,6 +46,15 @@ resource "azurerm_postgresql_flexible_server_database" "osmo" {
   charset   = "UTF8"
 }
 
+# Keycloak（浏览器登录的 OIDC 身份提供方）使用的数据库。
+# 专用账号由 deploy/scripts/06-keycloak-login.sh 在集群内创建（服务器只能私网访问）。
+resource "azurerm_postgresql_flexible_server_database" "keycloak" {
+  name      = "keycloak"
+  server_id = azurerm_postgresql_flexible_server.main.id
+  collation = "en_US.utf8"
+  charset   = "UTF8"
+}
+
 # OSMO 依赖的扩展
 resource "azurerm_postgresql_flexible_server_configuration" "extensions" {
   name      = "azure.extensions"

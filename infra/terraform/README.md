@@ -8,7 +8,7 @@ This module provisions the Azure infrastructure for PoC phase 1. OSMO 6.3.1 runs
 
 ![OSMO on Azure architecture](../../docs/images/azure-architecture.png)
 
-_Edges: green = private (VNet / Private Link) · orange dashed = public endpoint restricted to admin IPs · grey = outbound via NAT · blue dotted = identity / monitoring._
+_Edges: green = private (VNet / Private Link) · orange dashed = public entry (AKS API: admin IPs only; HTTPS ingress via Traefik: internet, OSMO/Keycloak authentication) · grey = outbound via NAT · blue dotted = identity / monitoring._
 
 | Component | Access | Notes |
 |---|---|---|

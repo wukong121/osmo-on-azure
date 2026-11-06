@@ -1,0 +1,49 @@
+# Optional overlay: browser/UI login through Keycloak (realm "osmo", client "osmo-web").
+# Applied by scripts/02-osmo-service.sh when KEYCLOAK_HOSTNAME is set or a Keycloak CR exists
+# (scripts/06-keycloak-login.sh sets it up). Placeholder replaced by the script: OSMO_HOSTNAME.
+#
+# Identity: "email" claim -> OSMO user. Authorization: the "roles" claim (Keycloak realm roles
+# osmo-admin / osmo-user, assigned through groups osmo-admins / osmo-users) -> OSMO roles.
+# In ConfigMap mode OSMO authz uses only token roles; `osmo user update --add-roles` has no effect
+# on browser sessions.
+gateway:
+  envoy:
+    # Public hostname: oauth2-proxy redirect URL https://OSMO_HOSTNAME/oauth2/callback
+    hostname: OSMO_HOSTNAME
+    # Envoy fetches Keycloak signing keys from https://OSMO_HOSTNAME/auth/...
+    idp:
+      host: OSMO_HOSTNAME
+    jwt:
+      user_header: x-osmo-user
+      providers:
+        # Keycloak ID tokens forwarded by oauth2-proxy (browser sessions)
+        - issuer: https://OSMO_HOSTNAME/auth/realms/osmo
+          audience: osmo-web
+          jwks_uri: https://OSMO_HOSTNAME/auth/realms/osmo/protocol/openid-connect/certs
+          user_claim: email
+          cluster: idp
+        # OSMO-issued JWTs (admin/backend tokens, workflow pods)
+        - issuer: osmo
+          audience: osmo
+          jwks_uri: https://osmo-service/api/auth/keys
+          user_claim: unique_name
+          cluster: osmo-service-jwks
+  oauth2Proxy:
+    enabled: true
+    scaling:
+      minReplicas: 1
+      maxReplicas: 1
+    provider: oidc
+    oidcIssuerUrl: https://OSMO_HOSTNAME/auth/realms/osmo
+    clientId: osmo-web
+    scope: "openid email profile"
+    useKubernetesSecrets: true
+    secretName: oauth2-proxy-secrets
+    clientSecretKey: client_secret
+    cookieSecretKey: cookie_secret
+    cookieSecure: true
+    # Sessions in encrypted cookies (no Redis dependency)
+    redisSessionStore: false
+    extraArgs:
+      # osmo-web requires PKCE
+      - --code-challenge-method=S256
