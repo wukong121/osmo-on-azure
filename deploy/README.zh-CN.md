@@ -154,6 +154,7 @@ osmo workflow logs <workflow-id>
 | 11 | 节点明明空闲，提交时却报 `Value ... too high`；或者新加的节点池没有出现在 `osmo resource list` 里 | backend listener 的节点缓存过期了，例如还在统计一个已经在 OSMO 之外被删掉的 Pod | `kubectl rollout restart deploy -n osmo-operator` |
 | 12 | 浏览器用户在数据库里已经分配了 OSMO 角色，但 UI 仍显示 “unable to load”（API 返回 403） | ConfigMap 模式（`services.configs.enabled`）下，OSMO authz 只从 token 的 `roles` 声明（经 `external_roles` 映射）获取角色，对 IdP 会话会忽略数据库中的角色分配 | 由 Keycloak 把 realm 角色写入 token 的 `roles` 声明，用 Keycloak 组来分配角色。（Dex 的静态用户无法生成 `roles` 声明，因此换成了 Keycloak） |
 | 13 | Keycloak Operator 26.8 反复崩溃重启（报错 `keycloakoidcclients ... Not Found`） | 26.8 还会监听新增的 OIDC/SAML client CRD | `06-keycloak-login.sh` 会安装全部 4 个 CRD |
+| 14 | 浏览器会话几分钟后就失效，刷新页面报 `Jwt is expired` | Keycloak 的 ID token 有效期只有 5 分钟，而 oauth2-proxy 每 1 小时才刷新一次会话，网关收到的是已经过期的 ID token | Keycloak 的 token 有效期改为 15 分钟（SSO 闲置超时 8 小时、最长 12 小时，配置在 [manifests/keycloak/realm-osmo.yaml](manifests/keycloak/realm-osmo.yaml)）；oauth2-proxy 设置 `cookieRefresh: 10m`、`cookieExpire: 12h` |
 
 ## 已知限制（第一阶段）
 

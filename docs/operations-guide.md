@@ -193,6 +193,8 @@ ContainerLogV2
 | 产物上传失败（Blob 403 或 SAS 过期） | SAS 轮换器失败超过 7 天 | `kubectl get cronjob,jobs -n osmo`；手动触发一次：`kubectl create job --from=cronjob/osmo-sas-rotator sas-manual -n osmo` |
 | `osmo` 命令报 `127.0.0.1:9000 Connection refused` | CLI 最后一次登录的是 port-forward 地址，而 port-forward 已经结束（例如没有配置公网域名时，`03`/`04` 脚本会临时开 port-forward；配置了域名后，脚本会自动改用域名） | 用公网域名重新登录（见第 2 节） |
 | 浏览器登录后页面空白，或显示 “unable to load”（403） | 该用户在 Keycloak 中不属于 `osmo-users` / `osmo-admins` 组 | 在 Keycloak 控制台把用户加入相应的组，然后让用户退出并重新登录 |
+| 浏览器页面报 `Jwt is expired` | 会话里的 ID token 已过期，但还没有被刷新（正常情况下 oauth2-proxy 每 10 分钟自动刷新一次） | 重新登录：访问 `https://<OSMO_HOSTNAME>/oauth2/sign_out`，或者清除站点 Cookie。如果反复出现，检查 Keycloak realm 的 token 有效期（15 分钟）是否仍然大于 oauth2-proxy 的 `cookieRefresh`（10 分钟） |
+| 闲置一段时间后要求重新登录 | Keycloak 会话闲置超过 8 小时，或者总时长超过 12 小时 | 正常现象，重新登录即可 |
 | 浏览器登录后又被跳回 Keycloak 登录页 | 密码错误、账号被禁用，或者 oauth2-proxy 刚重启 | 核对密码和账号状态，稍后重试 |
 | `osmo login` 返回 401 | 用了错误的 token，或者 token 已过期 | 重新从 `osmo-default-admin` Secret 读取 token 后登录 |
 | `osmo pool list` 显示 `OFFLINE` | backend operator 没有在运行 | `kubectl get pods -n osmo-operator`；执行 `00-resume.sh` 重启 |

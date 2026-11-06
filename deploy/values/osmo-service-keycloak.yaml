@@ -42,6 +42,10 @@ gateway:
     clientSecretKey: client_secret
     cookieSecretKey: cookie_secret
     cookieSecure: true
+    # Refresh the session (and the ID token forwarded to the gateway) before the 15-minute
+    # Keycloak token expires; cap the cookie at the 12-hour Keycloak SSO session.
+    cookieRefresh: 10m
+    cookieExpire: 12h
     # Sessions in encrypted cookies (no Redis dependency)
     redisSessionStore: false
     extraArgs:

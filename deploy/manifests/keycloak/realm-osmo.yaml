@@ -14,6 +14,11 @@ loginWithEmailAllowed: true
 duplicateEmailsAllowed: false
 resetPasswordAllowed: false
 bruteForceProtected: true
+# Token / session lifetimes. ID tokens must outlive oauth2-proxy's cookie refresh interval
+# (10m, values/osmo-service-keycloak.yaml), otherwise the gateway rejects them ("Jwt is expired").
+accessTokenLifespan: 900        # 15 min (also the ID token lifetime)
+ssoSessionIdleTimeout: 28800    # 8 h idle
+ssoSessionMaxLifespan: 43200    # 12 h max
 roles:
   realm:
     - name: osmo-admin
