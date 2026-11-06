@@ -154,6 +154,7 @@ Isaac Lab 3.0 notes, verified in the container:
 | 11 | Submit fails with `Value ... too high` although the node is idle, or a new node pool is missing from `osmo resource list` | The backend listener's node cache is stale. For example, it still counts a pod that was deleted outside OSMO. | `kubectl rollout restart deploy -n osmo-operator` |
 | 12 | Browser users have the right OSMO role in the database but the UI shows "unable to load" (403) | In ConfigMap mode (`services.configs.enabled`), OSMO authz takes roles only from the token `roles` claim (mapped by `external_roles`); database role assignments are ignored for IdP sessions | Keycloak emits realm roles as the `roles` claim; assign roles with Keycloak groups. (Dex static users cannot emit a `roles` claim, so Dex was replaced.) |
 | 13 | Keycloak Operator 26.8 crash-loops (`keycloakoidcclients ... Not Found`) | 26.8 also watches the new OIDC/SAML client CRDs | `06-keycloak-login.sh` installs all four CRDs |
+| 14 | Browser session breaks after a few minutes and refreshing the page shows `Jwt is expired` | Keycloak ID tokens lived 5 min, but oauth2-proxy refreshed the session only every 1 h, so the gateway received an expired ID token | Keycloak token lifetime 15 min (SSO idle 8 h, max 12 h, in [manifests/keycloak/realm-osmo.yaml](manifests/keycloak/realm-osmo.yaml)); oauth2-proxy `cookieRefresh: 10m`, `cookieExpire: 12h` |
 
 ## Known limitations (phase 1)
 
