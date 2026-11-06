@@ -61,6 +61,7 @@ locals {
     np_system      = "npsystem"
     np_system_tmp  = "npsystmp"
     np_gpu         = "npgput4"
+    np_cpu         = "npcpu"
 
     # 身份
     id_aks  = "id-${local.base_name}-aks"

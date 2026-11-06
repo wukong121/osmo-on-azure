@@ -18,7 +18,8 @@ _Edges: green = private (VNet / Private Link) · orange dashed = public endpoint
 | Blob storage | Private only (private endpoint) | Shared Key is disabled. OSMO uses Workload Identity, plus a user delegation SAS for workflow data on OSMO 6.3.1. |
 | Key Vault | Private only (private endpoint) | Reserved for in-cluster secret management (Key Vault CSI). Terraform does not write secrets into it; see Notes. |
 | GPU node pool | — | NVIDIA T4, **Spot** priority by default (Regular is available), can scale to zero, but keep `gpu_node_min_count = 1` while testing because OSMO rejects submissions to an empty platform. `gpu_driver=None`: the GPU Operator installs the driver. |
-| System node pool | — | `Standard_D8s_v4`, minimum **2** nodes. It also runs Traefik, KAI and policy-injected components, and OSMO rejects CPU tasks when the pool has no free CPU. |
+| System node pool (`npsystem`) | — | `Standard_D8s_v4` × 1–3. Runs the platform only: OSMO control plane, Traefik, KAI, GPU Operator controllers and policy-injected components. |
+| CPU task node pool (`npcpu`) | — | `Standard_D8s_v4` × 1–3, with taint `osmo/workload=cpu:NoSchedule`. Dedicated to OSMO CPU tasks (the `default` platform). Keep at least 1 node, because OSMO rejects tasks for a platform that has no free capacity. |
 | Public ingress (Traefik) | Static public IP `pip-<base>-ingress`, plus NSG `nsg-<base>-aks` on `snet-aks` | Only 80/443 to the ingress IP are allowed from the Internet. Traefik binds to this IP (see deploy/README.md, step 5). |
 
 Azure Container Registry is out of scope for phase 1. Images are pulled directly from nvcr.io.
@@ -48,7 +49,7 @@ Default names (`<sfx>` is the unique suffix):
 | Resource group / AKS node resource group | `rg-osmo-poc-wus3` / `rg-osmo-poc-wus3-aksnodes` |
 | VNet / subnets | `vnet-osmo-poc-wus3` / `snet-aks`, `snet-pep`, `snet-pgsql` |
 | NAT gateway / public IP | `ng-osmo-poc-wus3` / `pip-osmo-poc-wus3-ng` |
-| AKS / node pools | `aks-osmo-poc-wus3` / `npsystem`, `npgput4` |
+| AKS / node pools | `aks-osmo-poc-wus3` / `npsystem`, `npcpu`, `npgput4` |
 | Managed identities | `id-osmo-poc-wus3-aks` (control plane), `id-osmo-poc-wus3-osmo` (OSMO workloads) |
 | PostgreSQL | `pgsql-osmo-poc-wus3-<sfx>`, with private DNS zone `osmo-poc-wus3.private.postgres.database.azure.com` |
 | Managed Redis | `amr-osmo-poc-wus3-<sfx>` |

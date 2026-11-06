@@ -122,6 +122,44 @@ resource "azurerm_role_assignment" "deployer_aks_admin" {
 }
 
 ################################################################################
+# CPU 作业节点池（npcpu）
+#
+# OSMO 的 CPU 作业（默认平台）专用，与系统节点池（控制面）隔离：
+# - taint osmo/workload=cpu:NoSchedule：只有带对应容忍的 OSMO 作业 Pod 才会调度上来
+# - OSMO 的 default 平台通过 nodeSelector + toleration 绑定到此池（deploy/values/osmo-service.yaml）
+################################################################################
+
+resource "azurerm_kubernetes_cluster_node_pool" "cpu" {
+  count = var.cpu_node_pool_enabled ? 1 : 0
+
+  name                  = local.names.np_cpu
+  kubernetes_cluster_id = azurerm_kubernetes_cluster.main.id
+  vm_size               = var.cpu_node_vm_size
+  vnet_subnet_id        = azurerm_subnet.aks.id
+  os_disk_size_gb       = 128
+  max_pods              = 110
+
+  auto_scaling_enabled = true
+  min_count            = var.cpu_node_min_count
+  max_count            = var.cpu_node_max_count
+
+  node_taints = ["osmo/workload=cpu:NoSchedule"]
+  node_labels = {
+    "osmo/node-type" = "cpu"
+  }
+
+  upgrade_settings {
+    max_surge = "10%"
+  }
+
+  tags = local.tags
+
+  lifecycle {
+    ignore_changes = [node_count]
+  }
+}
+
+################################################################################
 # GPU 节点池（T4）
 #
 # - gpu_driver = "None"：不使用 AKS 自带驱动，由 GPU Operator 安装 595 分支驱动

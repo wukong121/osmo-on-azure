@@ -16,6 +16,7 @@ _Edges: green = private (VNet / Private Link) · orange dashed = public endpoint
 |---|---|
 | [docs/background.md](docs/background.md) (Chinese) | Project background, technology choices, PoC success criteria, open items |
 | [docs/reference-repos.md](docs/reference-repos.md) (Chinese) | Review of the reference repos (NVIDIA/OSMO, microsoft/physical-ai-toolchain): version choice, PostgreSQL TLS, reusable parts |
+| [docs/operations-guide.md](docs/operations-guide.md) (Chinese) | Operations guide: resume the environment, log in, view workflow history and logs, check resources, cost control, troubleshooting |
 | [docs/t4-feasibility.md](docs/t4-feasibility.md) (Chinese) | Feasibility of running Isaac Lab / Isaac Sim / MuJoCo / Gazebo on T4 GPUs |
 | [docs/images/](docs/images/) | Azure architecture, OSMO deployment architecture, OSMO workflow sequence |
 | [infra/terraform/](infra/terraform/README.md) | Azure infrastructure: AKS, T4 GPU node pool, private data services |

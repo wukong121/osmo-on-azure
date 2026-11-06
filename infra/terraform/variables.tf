@@ -144,13 +144,37 @@ variable "system_node_vm_size" {
 }
 
 variable "system_node_min_count" {
-  description = "系统节点池最小节点数。系统池同时承载 OSMO 控制面、Traefik、KAI 以及订阅策略注入的组件（如 Defender），OSMO 按节点当前空闲资源校验作业，1 台时 CPU 作业会被拒绝，建议 >= 2"
+  description = "系统节点池最小节点数（系统池只承载 OSMO 控制面、Traefik、KAI 等平台组件；OSMO 的 CPU 作业运行在 CPU 节点池）"
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "system_node_max_count" {
   description = "系统节点池最大节点数"
+  type        = number
+  default     = 3
+}
+
+variable "cpu_node_pool_enabled" {
+  description = "是否创建 OSMO CPU 作业节点池（npcpu）"
+  type        = bool
+  default     = true
+}
+
+variable "cpu_node_vm_size" {
+  description = "CPU 作业节点 VM 规格（MuJoCo / Gazebo 等以 CPU 为主的仿真）"
+  type        = string
+  default     = "Standard_D8s_v4"
+}
+
+variable "cpu_node_min_count" {
+  description = "CPU 作业节点池最小节点数。OSMO 按节点当前空闲资源校验作业，节点数为 0 时 CPU 作业会被拒绝，建议 >= 1"
+  type        = number
+  default     = 1
+}
+
+variable "cpu_node_max_count" {
+  description = "CPU 作业节点池最大节点数"
   type        = number
   default     = 3
 }

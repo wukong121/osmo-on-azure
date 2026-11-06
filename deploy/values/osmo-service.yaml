@@ -132,6 +132,16 @@ services:
             azure.workload.identity/use: "true"
         spec:
           serviceAccountName: osmo-workflow
+      # CPU task node pool (npcpu), separate from the system pool that runs the control plane
+      cpu_pool:
+        spec:
+          nodeSelector:
+            kubernetes.azure.com/agentpool: npcpu
+          tolerations:
+            - key: osmo/workload
+              operator: Equal
+              value: cpu
+              effect: NoSchedule
       # T4 Spot GPU node pool (npgput4)
       gpu_t4:
         spec:
@@ -160,7 +170,7 @@ services:
 
     pools:
       default:
-        description: "PoC pool: CPU tasks on system nodes, GPU tasks on T4 Spot nodes"
+        description: "PoC pool: CPU tasks on the npcpu pool, GPU tasks on T4 Spot nodes"
         backend: default
         default_platform: default
         common_pod_template:
@@ -168,8 +178,9 @@ services:
           - default_user
           - azure_workload_identity
         platforms:
-          # CPU-only tasks on the system node pool
+          # CPU-only tasks on the dedicated CPU node pool (npcpu)
           default:
+            override_pod_template: [cpu_pool]
             resource_validations: [no_gpu]
           # 1 x T4 per task. NC8as_T4_v3 = 8 vCPU / 56 GiB; leave headroom for DaemonSets and osmo-ctrl.
           t4:

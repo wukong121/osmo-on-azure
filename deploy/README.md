@@ -36,7 +36,7 @@ This directory deploys NVIDIA OSMO 6.3.1 onto the AKS cluster created by [infra/
   - `workflow_log` and `workflow_app` use Workload Identity. The control plane runs as ServiceAccount `osmo/osmo`.
   - `workflow_data` (task artifacts) uses a rotating, container-scoped **user delegation SAS**. The SAS is signed with Entra ID, not an account key. See the issues section below for why.
 - **Pool `default`.**
-  - Platform `default`: CPU-only tasks on the system node pool.
+  - Platform `default`: CPU-only tasks on the dedicated CPU node pool `npcpu` (nodeSelector plus a toleration for `osmo/workload=cpu`). The system pool runs only the platform components.
   - Platform `t4`: 1 × T4 per task on the Spot pool `npgput4`. It defaults to 4 CPU, 32 GiB memory and 50 GiB storage, and tolerates the `nvidia.com/gpu` and Spot taints.
 
 ## Prerequisites
@@ -125,7 +125,7 @@ Run a subset with `deploy/scripts/04-verify.sh hello storage`.
 | 4 | Task artifact upload fails with `KeyError: 'access_key_id'` | OSMO 6.3.1 bug: osmo-ctrl assumes the workflow_data credential has keys. Fixed in OSMO 6.4, which is not released yet. Account keys are blocked by policy. | User delegation SAS for `workflow_data`, rotated every 3 days by a CronJob ([manifests/workflow-data-sas-rotator.yaml](manifests/workflow-data-sas-rotator.yaml)) |
 | 5 | GPU containers fail with `No help topic for 'apply-cuda-memory-limits'` | Container toolkit v1.17.8 (pinned by microsoft/physical-ai-toolchain for operator v26.3) is too old for operator v26.7 | Use the chart's toolkit v1.20.1. GPU nodes run Ubuntu 22.04, where it is stable. |
 | 6 | GPU submit fails with `There are no resources in platform t4` | OSMO validates against existing nodes, so a pool at 0 nodes cannot receive work | Keep `gpu_node_min_count = 1` while testing, and set it to 0 when idle |
-| 7 | CPU submit fails with `Value 1.0 too high for CPU` | The system pool also runs Traefik, KAI, the GPU Operator controllers and policy-injected components such as Defender. OSMO validates against free capacity, not autoscaling. | `system_node_min_count` defaults to 2 |
+| 7 | CPU submit fails with `Value 1.0 too high for CPU` | The system pool also runs Traefik, KAI, the GPU Operator controllers and policy-injected components such as Defender. OSMO validates against free capacity, not autoscaling. | CPU tasks run on a dedicated node pool `npcpu`, and the system pool runs only the platform components |
 | 8 | After the nightly auto-shutdown, osmo-service, worker and agent are missing | Pods are created before the Workload Identity webhook is ready (`failed calling webhook mutation.azure-workload-identity.io`) | `scripts/00-resume.sh` starts AKS and PostgreSQL and restarts the OSMO deployments |
 | 9 | Envoy keeps serving the old config, with logs showing `unknown cluster 'oauth2-proxy'` | Envoy loads listeners and clusters from separate files, so a route can briefly reference a cluster that is not loaded yet, and the rejected update is not retried | `02-osmo-service.sh` restarts Envoy after every Helm upgrade |
 | 10 | The public IP does not respond on 80/443 | A subscription policy attached a deny-all-inbound NSG to every subnet | infra/terraform manages its own `snet-aks` NSG that allows 80/443 only to the ingress IP |

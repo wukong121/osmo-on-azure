@@ -16,6 +16,7 @@ _连线说明：绿色 = 私网（VNet / Private Link）· 橙色虚线 = 仅放
 |---|---|
 | [docs/background.md](docs/background.md) | 项目背景、技术选型、PoC 成功标准、待确认事项 |
 | [docs/reference-repos.md](docs/reference-repos.md) | 参考仓库研读结论（NVIDIA/OSMO、microsoft/physical-ai-toolchain）：版本选择、PG TLS、可复用内容 |
+| [docs/operations-guide.md](docs/operations-guide.md) | 操作手册：恢复环境、登录、查看调度记录和日志、资源查看、成本控制、常见问题 |
 | [docs/t4-feasibility.md](docs/t4-feasibility.md) | T4 GPU 运行 Isaac Lab / Isaac Sim / MuJoCo / Gazebo 的可行性评估 |
 | [docs/images/](docs/images/) | Azure 部署架构图、OSMO 部署架构图、工作流时序图 |
 | [infra/terraform/](infra/terraform/README.zh-CN.md) | Azure 基础设施（AKS、T4 GPU 池、私网数据组件） |
