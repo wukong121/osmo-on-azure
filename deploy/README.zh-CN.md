@@ -36,7 +36,7 @@
   - `workflow_log` 和 `workflow_app` 使用 Workload Identity，控制面使用 ServiceAccount `osmo/osmo`。
   - `workflow_data`（任务产物）使用定期轮换的、容器级的**用户委托 SAS**。这个 SAS 由 Entra ID 签发，不依赖账号密钥，原因见下文。
 - **资源池 `default`**：
-  - 平台 `default`：仅 CPU 任务，运行在系统节点池。
+  - 平台 `default`：仅 CPU 任务，运行在专用的 CPU 节点池 `npcpu` 上（通过 nodeSelector 指定节点池，并容忍 `osmo/workload=cpu` taint）。系统节点池只运行平台组件。
   - 平台 `t4`：每个任务 1 张 T4，运行在 Spot 节点池 `npgput4`。默认 4 CPU、32 GiB 内存、50 GiB 存储，并容忍 `nvidia.com/gpu` 和 Spot 两个 taint。
 
 ## 前置条件
@@ -125,7 +125,7 @@ osmo workflow logs <workflow-id>
 | 4 | 任务产物上传报 `KeyError: 'access_key_id'` | OSMO 6.3.1 的 bug：osmo-ctrl 默认 workflow_data 凭据里一定有密钥。6.4 已修复但尚未发布；账号密钥又被订阅策略禁用 | `workflow_data` 改用用户委托 SAS，由 CronJob 每 3 天轮换一次（[manifests/workflow-data-sas-rotator.yaml](manifests/workflow-data-sas-rotator.yaml)） |
 | 5 | GPU 容器启动失败，报 `No help topic for 'apply-cuda-memory-limits'` | container toolkit v1.17.8 是 microsoft/physical-ai-toolchain 为 operator v26.3 锁定的版本，对 operator v26.7 来说太旧 | 改用 chart 自带的 toolkit v1.20.1；GPU 节点运行 Ubuntu 22.04，在这个系统上运行稳定 |
 | 6 | 提交 GPU 任务报 `There are no resources in platform t4` | OSMO 按现有节点校验资源，节点池缩到 0 时无法接收任务 | 测试期间设置 `gpu_node_min_count = 1`，闲置时改回 0 |
-| 7 | 提交 CPU 任务报 `Value 1.0 too high for CPU` | 系统池上还运行着 Traefik、KAI、GPU Operator 控制器，以及订阅策略注入的 Defender 等组件；OSMO 按节点当前空闲资源校验，不会触发自动扩容 | `system_node_min_count` 默认改为 2 |
+| 7 | 提交 CPU 任务报 `Value 1.0 too high for CPU` | 系统池上还运行着 Traefik、KAI、GPU Operator 控制器，以及订阅策略注入的 Defender 等组件；OSMO 按节点当前空闲资源校验，不会触发自动扩容 | CPU 任务改到专用节点池 `npcpu` 上运行，系统节点池只运行平台组件 |
 | 8 | 每晚自动停机后，osmo-service、worker、agent 等组件缺失 | 集群启动时 Workload Identity 的 webhook 还没就绪，Pod 创建失败（`failed calling webhook mutation.azure-workload-identity.io`） | 运行 `scripts/00-resume.sh`：启动 AKS 和 PostgreSQL，并重启 OSMO 的各个 Deployment |
 | 9 | Envoy 一直沿用旧配置，日志报 `unknown cluster 'oauth2-proxy'` | Envoy 从两个文件分别加载监听器和集群配置，路由可能引用了一个还没加载的集群，被拒绝的更新不会自动重试 | `02-osmo-service.sh` 在每次 Helm 升级后重启 Envoy |
 | 10 | 公网 IP 的 80/443 端口不通 | 订阅策略给每个子网都自动挂上了默认拒绝所有入站流量的 NSG | infra/terraform 为 `snet-aks` 创建自管的 NSG，只允许访问入口 IP 的 80/443 |

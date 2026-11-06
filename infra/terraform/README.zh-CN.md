@@ -18,7 +18,8 @@ _连线说明：绿色 = 私网（VNet / Private Link）· 橙色虚线 = 仅放
 | Blob 存储 | 仅私网（PE） | 禁用 Shared Key。OSMO 通过 Workload Identity 访问；在 OSMO 6.3.1 上，workflow data 另外使用用户委托 SAS |
 | Key Vault | 仅私网（PE） | 预留给集群内密钥管理（Key Vault CSI）；Terraform 不向其写入 secret，见注意事项 |
 | GPU 节点池 | — | T4，默认 **Spot** 优先级（可改为 Regular），可以缩到 0 个节点，但测试期间请设置 `gpu_node_min_count = 1`，因为 OSMO 不接受提交到没有节点的平台；`gpu_driver=None`，驱动由 GPU Operator 安装 |
-| 系统节点池 | — | `Standard_D8s_v4`，最少 **2** 台。它同时运行 Traefik、KAI 和订阅策略注入的组件；池中没有空闲 CPU 时，OSMO 会拒绝 CPU 任务 |
+| 系统节点池（`npsystem`） | — | `Standard_D8s_v4` × 1–3，只运行平台组件：OSMO 控制面、Traefik、KAI、GPU Operator 控制器，以及订阅策略注入的组件 |
+| CPU 作业节点池（`npcpu`） | — | `Standard_D8s_v4` × 1–3，带 taint `osmo/workload=cpu:NoSchedule`，专门运行 OSMO 的 CPU 任务（`default` 平台）。请至少保留 1 台：平台没有空闲资源时，OSMO 会直接拒绝提交 |
 | 公网入口（Traefik） | 固定公网 IP `pip-<base>-ingress`，以及 `snet-aks` 上的 NSG `nsg-<base>-aks` | 只允许来自 Internet、访问入口 IP 80/443 端口的流量。Traefik 绑定到这个 IP（见 deploy/README.zh-CN.md 第 5 步） |
 
 ACR 不在第一阶段范围内，镜像直接从 nvcr.io 拉取。
@@ -48,7 +49,7 @@ ACR 不在第一阶段范围内，镜像直接从 nvcr.io 拉取。
 | 资源组 / AKS 节点资源组 | `rg-osmo-poc-wus3` / `rg-osmo-poc-wus3-aksnodes` |
 | VNet / 子网 | `vnet-osmo-poc-wus3` / `snet-aks`、`snet-pep`、`snet-pgsql` |
 | NAT Gateway / 公网 IP | `ng-osmo-poc-wus3` / `pip-osmo-poc-wus3-ng` |
-| AKS / 节点池 | `aks-osmo-poc-wus3` / `npsystem`、`npgput4` |
+| AKS / 节点池 | `aks-osmo-poc-wus3` / `npsystem`、`npcpu`、`npgput4` |
 | 托管身份 | `id-osmo-poc-wus3-aks`（控制面）、`id-osmo-poc-wus3-osmo`（OSMO 工作负载） |
 | PostgreSQL | `pgsql-osmo-poc-wus3-<sfx>`，私有 DNS 区域 `osmo-poc-wus3.private.postgres.database.azure.com` |
 | Managed Redis | `amr-osmo-poc-wus3-<sfx>` |
