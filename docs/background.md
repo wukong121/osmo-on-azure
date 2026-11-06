@@ -138,13 +138,14 @@ Isaac Sim 的 RTX 渲染和相机类作业在 T4 上能不能跑还不确定，�
 - [x] 研读两个参考仓库 → 见 [reference-repos.md](reference-repos.md)
 - [x] OSMO 版本 → 6.3.1（6.4 还没有发布 chart 和镜像）
 - [x] T4 可行性 → Isaac Lab 3.0 Newton headless、MuJoCo、Gazebo 可行；Isaac Sim 渲染不确定（见 [t4-feasibility.md](t4-feasibility.md)）
-- [ ] 拿到 T4 机器后按 t4-feasibility.md 的清单实测
+- [x] T4 实测 → Isaac Lab Newton headless 通过；Isaac Sim 渲染尚未测试
 - [x] T4 配额 → 测试订阅按需 T4 配额为 0，PoC 改用 **Spot** T4（Low-priority 配额 100 vCPU）；客户正式环境再评估按需配额
 - [x] Terraform 第一版 → `infra/terraform/`，已在测试订阅 apply（2026-11-05）
 - [x] OSMO 6.3.1 部署 → `deploy/`；**第一阶段三项验收全部通过**（hello / 存储往返 / T4 GPU，2026-11-05）。部署中发现的 6 个问题和修复见 `deploy/README.zh-CN.md`
 - [x] 公网域名 + HTTPS（Traefik + 自有证书 + 固定 IP）→ 已上线，CLI 可通过域名使用 token 登录（2026-11-06）
 - [ ] 接入 Entra ID，开放 Web UI：配置层已就绪，但测试租户（FDPO）里来宾账号需要管理员同意，**需要在一个能授予管理员同意的租户中注册应用**
 - [ ] 订阅每晚北京时间约 00:05 自动停止 AKS 和 PostgreSQL，使用前运行 `deploy/scripts/00-resume.sh`；客户演示前需提前启动
-- [ ] Isaac Lab / MuJoCo / Gazebo 示例作业
+- [x] Isaac Lab 示例作业 → Isaac Lab 3.0 + Newton + Cartpole headless 在 T4 上作为 OSMO 作业跑通（2026-11-06）
+- [ ] MuJoCo / Gazebo 示例作业
 - [ ] OSMO 6.4 发布后升级，去掉 workflow_data SAS 轮换器
 - [x] PostgreSQL TLS → 可以开启
