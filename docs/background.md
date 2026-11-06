@@ -143,7 +143,8 @@ Isaac Sim 的 RTX 渲染和相机类作业在 T4 上能不能跑还不确定，�
 - [x] Terraform 第一版 → `infra/terraform/`，已在测试订阅 apply（2026-11-05）
 - [x] OSMO 6.3.1 部署 → `deploy/`；**第一阶段三项验收全部通过**（hello / 存储往返 / T4 GPU，2026-11-05）。部署中发现的 6 个问题和修复见 `deploy/README.zh-CN.md`
 - [x] 公网域名 + HTTPS（Traefik + 自有证书 + 固定 IP）→ 已上线，CLI 可通过域名使用 token 登录（2026-11-06）
-- [ ] 接入 Entra ID，开放 Web UI：配置层已就绪，但测试租户（FDPO）里来宾账号需要管理员同意，**需要在一个能授予管理员同意的租户中注册应用**
+- [x] Web UI 浏览器登录 → Keycloak（官方 Operator）+ 用户名/密码，按组区分 osmo-admin / osmo-user，已开通 3 个账号（2026-11-06）
+- [ ] （可选）接入 Entra ID：配置层已就绪，但测试租户（FDPO）里来宾账号需要管理员同意，**需要在一个能授予管理员同意的租户中注册应用**
 - [ ] 订阅每晚北京时间约 00:05 自动停止 AKS 和 PostgreSQL，使用前运行 `deploy/scripts/00-resume.sh`；客户演示前需提前启动
 - [x] Isaac Lab 示例作业 → Isaac Lab 3.0 + Newton + Cartpole headless 在 T4 上作为 OSMO 作业跑通（2026-11-06）
 - [x] MuJoCo / Gazebo 示例作业 → MuJoCo 3.17 与 Gazebo Harmonic（gz-sim 8.11）headless 仿真在 CPU 节点池上作为 OSMO 作业跑通（2026-11-06）

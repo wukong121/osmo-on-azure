@@ -50,9 +50,23 @@ fi
 
 endpoint="azure://${STORAGE_ACCOUNT}/${STORAGE_CONTAINER}"
 
-# Optional Entra ID browser login (values/osmo-service-entra.yaml)
+# Optional browser login: Keycloak (values/osmo-service-keycloak.yaml, set up by 06-keycloak-login.sh)
+# or Entra ID (values/osmo-service-entra.yaml). Without either, OSMO is token-only (CLI).
 extra_values=()
-if [[ -n "${ENTRA_CLIENT_ID:-}" ]]; then
+# Keep Keycloak login enabled on plain re-runs: detect an existing Keycloak from its Ingress
+if [[ -z "${KEYCLOAK_HOSTNAME:-}" && -z "${ENTRA_CLIENT_ID:-}" ]] \
+   && kubectl get keycloak keycloak -n keycloak >/dev/null 2>&1; then
+  KEYCLOAK_HOSTNAME="$(kubectl get ingress keycloak -n keycloak -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || true)"
+  [[ -n "$KEYCLOAK_HOSTNAME" ]] && info "Detected Keycloak at https://$KEYCLOAK_HOSTNAME/auth; keeping browser login enabled"
+fi
+if [[ -n "${KEYCLOAK_HOSTNAME:-}" ]]; then
+  [[ -n "$(secret_value "$NS_OSMO" oauth2-proxy-secrets client_secret)" ]] \
+    || fatal "Secret $NS_OSMO/oauth2-proxy-secrets is missing; run 06-keycloak-login.sh"
+  rendered="$(mktemp)"; trap 'rm -f "$rendered"' EXIT
+  sed -e "s/OSMO_HOSTNAME/${KEYCLOAK_HOSTNAME}/g" "$VALUES_DIR/osmo-service-keycloak.yaml" > "$rendered"
+  extra_values=(-f "$rendered")
+  info "Keycloak login enabled (https://$KEYCLOAK_HOSTNAME/auth/realms/osmo)"
+elif [[ -n "${ENTRA_CLIENT_ID:-}" ]]; then
   [[ -n "${ENTRA_TENANT_ID:-}" ]] || fatal "ENTRA_TENANT_ID is required with ENTRA_CLIENT_ID"
   [[ -n "$(secret_value "$NS_OSMO" oauth2-proxy-secrets client_secret)" ]] \
     || fatal "Secret $NS_OSMO/oauth2-proxy-secrets (client_secret, cookie_secret) is missing"

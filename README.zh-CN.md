@@ -8,7 +8,7 @@
 
 ![OSMO on Azure 架构](docs/images/azure-architecture.png)
 
-_连线说明：绿色 = 私网（VNet / Private Link）· 橙色虚线 = 仅放行管理 IP 的公网入口 · 灰色 = 经 NAT 出网 · 蓝色点线 = 身份 / 监控。_
+_连线说明：绿色 = 私网（VNet / Private Link）· 橙色虚线 = 公网入口（AKS API 仅放行管理 IP；Traefik HTTPS 入口对互联网开放，由 OSMO / Keycloak 认证保护） · 灰色 = 经 NAT 出网 · 蓝色点线 = 身份 / 监控。_
 
 ## 文档
 
@@ -19,11 +19,28 @@ _连线说明：绿色 = 私网（VNet / Private Link）· 橙色虚线 = 仅放
 | [docs/operations-guide.md](docs/operations-guide.md) | 操作手册：恢复环境、登录、查看调度记录和日志、资源查看、成本控制、常见问题 |
 | [docs/t4-feasibility.md](docs/t4-feasibility.md) | T4 GPU 运行 Isaac Lab / Isaac Sim / MuJoCo / Gazebo 的可行性评估 |
 | [docs/images/](docs/images/) | Azure 部署架构图、OSMO 部署架构图、工作流时序图 |
-| [infra/terraform/](infra/terraform/README.zh-CN.md) | Azure 基础设施（AKS、T4 GPU 池、私网数据组件） |
-| [deploy/](deploy/README.zh-CN.md) | OSMO 6.3.1 的 Helm 部署（GPU Operator、KAI、OSMO service、backend operator）和第一阶段验收工作流 |
+| [infra/terraform/](infra/terraform/README.zh-CN.md) | Azure 基础设施：AKS（系统池、CPU 池、T4 Spot GPU 池）、私网数据组件、固定入口 IP |
+| [deploy/](deploy/README.zh-CN.md) | OSMO 6.3.1 部署（GPU Operator、KAI、OSMO service、backend operator、Traefik、Keycloak）、验收检查与仿真示例 |
 
-## 当前技术选型（PoC 第一阶段）
+## 当前状态（PoC 第一阶段）
 
-- OSMO 6.3.1（开源版，chart `service` / `backend-operator` 1.3.1）
-- AKS 部署在 westus3，GPU 用 T4（`Standard_NC*as_T4_v3`），基础设施用 Terraform 管理
-- AKS API 第一阶段走公网（限制来源 IP）；PostgreSQL、Redis、Blob、Key Vault 走私网（第一阶段不含 ACR）
+- **平台**：NVIDIA OSMO 6.3.1（开源版，chart `service` / `backend-operator` 1.3.1），部署在 West US 3 的 AKS 上，基础设施由 Terraform 管理。
+- **算力**：
+  - 系统节点池：运行平台组件。
+  - CPU 节点池 `npcpu`：专门运行 OSMO 的 CPU 作业。
+  - T4 Spot GPU 节点池 `npgput4`：运行 GPU 作业，驱动 595 由 GPU Operator 安装。
+  - 作业由 KAI 调度。
+- **网络**：
+  - AKS API 走公网，只放行管理 IP。
+  - PostgreSQL、Redis、Blob、Key Vault 只能经私网访问。
+  - OSMO 通过 Traefik 发布到公网 HTTPS 域名，使用自有证书和固定 IP。
+- **认证**：
+  - Web UI：使用 Keycloak（官方 Operator），用户名 + 密码登录；OSMO 角色（`osmo-admin` / `osmo-user`）由 Keycloak 中的组决定。
+  - CLI 和自动化：使用 OSMO access token。
+- **已验证**：
+  - 主链路：登录 → 提交 → 排队 → 调度 → 状态 → 日志 → 产物。
+  - 仿真示例：
+    - Isaac Lab 3.0 headless 训练（T4）
+    - MuJoCo（CPU 池）
+    - Gazebo Harmonic（CPU 池）
+- **已知限制**：见 [deploy/README.zh-CN.md](deploy/README.zh-CN.md#已知限制第一阶段)。例如，在 OSMO 6.4 发布之前，workflow-data 需要依赖 SAS 轮换器这一变通方案；订阅每晚会自动停机。

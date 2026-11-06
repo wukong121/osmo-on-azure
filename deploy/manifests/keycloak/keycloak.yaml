@@ -1,0 +1,39 @@
+# Keycloak instance managed by the official Keycloak Operator (26.8.2).
+# Rendered by deploy/scripts/06-keycloak-login.sh with envsubst: ${OSMO_HOSTNAME} ${PG_FQDN}
+#
+# - Served at https://${OSMO_HOSTNAME}/auth through Traefik (TLS terminated at Traefik)
+# - Database: Azure PostgreSQL Flexible Server (private, TLS required), database "keycloak",
+#   dedicated login "keycloak" (Secret keycloak/keycloak-db)
+apiVersion: k8s.keycloak.org/v2beta1
+kind: Keycloak
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  instances: 1
+  db:
+    vendor: postgres
+    url: "jdbc:postgresql://${PG_FQDN}:5432/keycloak?sslmode=require"
+    usernameSecret:
+      name: keycloak-db
+      key: username
+    passwordSecret:
+      name: keycloak-db
+      key: password
+  http:
+    httpEnabled: true
+  hostname:
+    hostname: "https://${OSMO_HOSTNAME}/auth"
+  proxy:
+    headers: xforwarded
+  ingress:
+    enabled: false
+  additionalOptions:
+    - name: http-relative-path
+      value: /auth
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      memory: 2Gi

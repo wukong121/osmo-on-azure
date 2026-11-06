@@ -15,6 +15,7 @@ This directory deploys NVIDIA OSMO 6.3.1 onto the AKS cluster created by [infra/
 | OSMO service | `osmo/service` 1.3.1 (OSMO 6.3.1), release `osmo` | `osmo` | API, router, worker, logger, agent, UI, Envoy gateway, authz |
 | OSMO backend operator | `osmo/backend-operator` 1.3.1, release `osmo-operator` | `osmo-operator` | Registers AKS as backend `default`. Workflow pods run in `osmo-workflows`. |
 | Traefik (public HTTPS entry, optional) | `traefik/traefik` 42.3.0 (Traefik v3.7.17) | `traefik` | Terminates TLS with your certificate and routes to `osmo-gateway`. Uses the static public IP from infra/terraform. |
+| Keycloak (browser login, optional) | Keycloak Operator 26.8.2 (official manifests) | `keycloak` | OIDC provider at `https://<hostname>/auth`, realm `osmo`. Groups `osmo-admins` / `osmo-users` map to OSMO roles through the token `roles` claim. Database `keycloak` on the existing PostgreSQL (dedicated login, TLS). |
 | Workflow-data SAS rotator | [manifests/workflow-data-sas-rotator.yaml](manifests/workflow-data-sas-rotator.yaml) | `osmo` | A CronJob that works around an OSMO 6.3.1 bug (see below). Remove it after upgrading to OSMO 6.4. |
 
 ## Phase-1 design
@@ -62,6 +63,10 @@ deploy/scripts/04-verify.sh           # phase-1 acceptance workflows
 # Optional: public HTTPS hostname through Traefik
 OSMO_HOSTNAME=osmo.example.com TLS_CERT_FILE=/path/fullchain.pem TLS_KEY_FILE=/path/private.key \
   deploy/scripts/05-public-endpoint.sh   # then point a DNS A record at: terraform output ingress_public_ip
+
+# Optional: browser / web UI login with per-user roles (Keycloak), after step 5
+OSMO_HOSTNAME=osmo.example.com KEYCLOAK_ADMINS="alice@example.com" KEYCLOAK_USERS="bob@example.com" \
+  deploy/scripts/06-keycloak-login.sh    # initial (temporary) passwords: ~/.osmo-keycloak-initial-passwords
 
 # After the cluster was stopped (e.g. nightly auto-shutdown)
 deploy/scripts/00-resume.sh
@@ -147,12 +152,14 @@ Isaac Lab 3.0 notes, verified in the container:
 | 9 | Envoy keeps serving the old config, with logs showing `unknown cluster 'oauth2-proxy'` | Envoy loads listeners and clusters from separate files, so a route can briefly reference a cluster that is not loaded yet, and the rejected update is not retried | `02-osmo-service.sh` restarts Envoy after every Helm upgrade |
 | 10 | The public IP does not respond on 80/443 | A subscription policy attached a deny-all-inbound NSG to every subnet | infra/terraform manages its own `snet-aks` NSG that allows 80/443 only to the ingress IP |
 | 11 | Submit fails with `Value ... too high` although the node is idle, or a new node pool is missing from `osmo resource list` | The backend listener's node cache is stale. For example, it still counts a pod that was deleted outside OSMO. | `kubectl rollout restart deploy -n osmo-operator` |
+| 12 | Browser users have the right OSMO role in the database but the UI shows "unable to load" (403) | In ConfigMap mode (`services.configs.enabled`), OSMO authz takes roles only from the token `roles` claim (mapped by `external_roles`); database role assignments are ignored for IdP sessions | Keycloak emits realm roles as the `roles` claim; assign roles with Keycloak groups. (Dex static users cannot emit a `roles` claim, so Dex was replaced.) |
+| 13 | Keycloak Operator 26.8 crash-loops (`keycloakoidcclients ... Not Found`) | 26.8 also watches the new OIDC/SAML client CRDs | `06-keycloak-login.sh` installs all four CRDs |
 
 ## Known limitations (phase 1)
 
 - **Azure Policy for Kubernetes runs in audit mode in this subscription.** It reports workflow pods that run as root, have no limits, use images outside ACR, and so on. If a customer environment enforces (denies) these rules, OSMO workflow pods and nvcr.io images will be rejected: mirror images to ACR and adjust the pod templates.
 
-- **No browser login yet.** The Entra ID overlay ([values/osmo-service-entra.yaml](values/osmo-service-entra.yaml)) has been tested up to the Entra sign-in page. In the test tenant the sign-in then stops at "admin approval required", because guest accounts cannot consent. Use an app registration in a tenant where you can grant admin consent. Enable the overlay by running `02-osmo-service.sh` with `ENTRA_CLIENT_ID` and `ENTRA_TENANT_ID` set, after creating the `osmo/oauth2-proxy-secrets` Secret.
+- **Browser login uses Keycloak (step 6).** Manage users and roles in the Keycloak admin console (`https://<hostname>/auth/admin`, realm `osmo`): add a user to group `osmo-admins` or `osmo-users`. In OSMO's ConfigMap mode, browser sessions get roles only from the token `roles` claim, so `osmo user update --add-roles` has no effect on them. The Keycloak admin console is reachable from the internet; protect the admin account with a strong password and OTP. The Entra ID overlay ([values/osmo-service-entra.yaml](values/osmo-service-entra.yaml)) remains as an alternative.
 - **Nightly auto-shutdown.** Some subscriptions stop AKS and PostgreSQL every night. Run `scripts/00-resume.sh` before use.
 
 - **Artifacts can only be downloaded from inside the VNet.** Blob has no public endpoint, so `osmo` commands that move data directly between your workstation and storage do not work from outside the VNet.

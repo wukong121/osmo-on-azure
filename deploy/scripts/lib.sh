@@ -68,7 +68,8 @@ apply_secret() {
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 }
 
-secret_value() { kubectl get secret "$2" -n "$1" -o jsonpath="{.data.$3}" 2>/dev/null | base64 -d; }
+# secret_value <namespace> <name> <key>: decoded value, or empty if the Secret/key does not exist
+secret_value() { kubectl get secret "$2" -n "$1" -o jsonpath="{.data.$3}" 2>/dev/null | base64 -d 2>/dev/null || true; }
 
 # Connect to the OSMO gateway and set OSMO_URL.
 # Prefers OSMO_URL if set and reachable, then the public hostname (Ingress osmo/osmo-public).

@@ -15,6 +15,7 @@
 | OSMO service | `osmo/service` 1.3.1（OSMO 6.3.1），release `osmo` | `osmo` | API、Router、Worker、Logger、Agent、UI、Envoy 网关、authz |
 | OSMO backend operator | `osmo/backend-operator` 1.3.1，release `osmo-operator` | `osmo-operator` | 把 AKS 注册为 backend `default`；工作流 Pod 运行在 `osmo-workflows` |
 | Traefik（公网 HTTPS 入口，可选） | `traefik/traefik` 42.3.0（Traefik v3.7.17） | `traefik` | 用你提供的证书终止 TLS，转发到 `osmo-gateway`；使用 infra/terraform 管理的固定公网 IP |
+| Keycloak（浏览器登录，可选） | Keycloak Operator 26.8.2（官方清单） | `keycloak` | OIDC 身份提供方，地址 `https://<域名>/auth`，realm 为 `osmo`。组 `osmo-admins` / `osmo-users` 通过 token 中的 `roles` 声明映射为 OSMO 角色。数据库为现有 PostgreSQL 上的 `keycloak` 库（专用账号，TLS 连接） |
 | workflow-data SAS 轮换器 | [manifests/workflow-data-sas-rotator.yaml](manifests/workflow-data-sas-rotator.yaml) | `osmo` | 绕过 OSMO 6.3.1 bug 的 CronJob（原因见下文），升级到 OSMO 6.4 后删除 |
 
 ## 第一阶段设计
@@ -62,6 +63,10 @@ deploy/scripts/04-verify.sh           # 第一阶段验收工作流
 # 可选：通过 Traefik 开放公网 HTTPS 域名
 OSMO_HOSTNAME=osmo.example.com TLS_CERT_FILE=/path/fullchain.pem TLS_KEY_FILE=/path/private.key \
   deploy/scripts/05-public-endpoint.sh   # 然后把 DNS A 记录指向：terraform output ingress_public_ip
+
+# 可选：浏览器 / Web UI 登录，按用户区分角色（Keycloak），需先完成第 5 步
+OSMO_HOSTNAME=osmo.example.com KEYCLOAK_ADMINS="alice@example.com" KEYCLOAK_USERS="bob@example.com" \
+  deploy/scripts/06-keycloak-login.sh    # 初始（临时）密码保存在 ~/.osmo-keycloak-initial-passwords
 
 # 集群被停止后恢复（例如每晚的自动停机）
 deploy/scripts/00-resume.sh
@@ -147,12 +152,14 @@ osmo workflow logs <workflow-id>
 | 9 | Envoy 一直沿用旧配置，日志报 `unknown cluster 'oauth2-proxy'` | Envoy 从两个文件分别加载监听器和集群配置，路由可能引用了一个还没加载的集群，被拒绝的更新不会自动重试 | `02-osmo-service.sh` 在每次 Helm 升级后重启 Envoy |
 | 10 | 公网 IP 的 80/443 端口不通 | 订阅策略给每个子网都自动挂上了默认拒绝所有入站流量的 NSG | infra/terraform 为 `snet-aks` 创建自管的 NSG，只允许访问入口 IP 的 80/443 |
 | 11 | 节点明明空闲，提交时却报 `Value ... too high`；或者新加的节点池没有出现在 `osmo resource list` 里 | backend listener 的节点缓存过期了，例如还在统计一个已经在 OSMO 之外被删掉的 Pod | `kubectl rollout restart deploy -n osmo-operator` |
+| 12 | 浏览器用户在数据库里已经分配了 OSMO 角色，但 UI 仍显示 “unable to load”（API 返回 403） | ConfigMap 模式（`services.configs.enabled`）下，OSMO authz 只从 token 的 `roles` 声明（经 `external_roles` 映射）获取角色，对 IdP 会话会忽略数据库中的角色分配 | 由 Keycloak 把 realm 角色写入 token 的 `roles` 声明，用 Keycloak 组来分配角色。（Dex 的静态用户无法生成 `roles` 声明，因此换成了 Keycloak） |
+| 13 | Keycloak Operator 26.8 反复崩溃重启（报错 `keycloakoidcclients ... Not Found`） | 26.8 还会监听新增的 OIDC/SAML client CRD | `06-keycloak-login.sh` 会安装全部 4 个 CRD |
 
 ## 已知限制（第一阶段）
 
 - **本订阅的 Azure Policy for Kubernetes 处于 audit（审计）模式**：它会对工作流 Pod 以 root 运行、未设置 limits、镜像不在 ACR 中等情况发出告警，但不会拦截。如果客户环境把这些规则设为强制（deny），OSMO 的工作流 Pod 和 nvcr.io 镜像都会被拒绝，届时需要把镜像同步到 ACR，并相应调整 pod 模板。
 
-- **暂无浏览器登录**：Entra ID 配置层（[values/osmo-service-entra.yaml](values/osmo-service-entra.yaml)）已经验证到 Entra 登录页，但在测试租户里会停在“需要管理员批准”，原因是来宾账号不能自行同意。请改用一个你能授予管理员同意的租户来注册应用。启用方法：先创建 Secret `osmo/oauth2-proxy-secrets`，再带上 `ENTRA_CLIENT_ID` 和 `ENTRA_TENANT_ID` 两个环境变量运行 `02-osmo-service.sh`。
+- **浏览器登录使用 Keycloak（第 6 步）**：在 Keycloak 管理控制台（`https://<域名>/auth/admin`，realm 选 `osmo`）中管理用户和角色，把用户加入 `osmo-admins` 或 `osmo-users` 组即可。在 OSMO 的 ConfigMap 模式下，浏览器会话的角色只来自 token 中的 `roles` 声明，所以 `osmo user update --add-roles` 对浏览器用户不起作用。Keycloak 管理控制台可以从公网访问，请为管理员账号设置强密码并开启 OTP。Entra ID 配置层（[values/osmo-service-entra.yaml](values/osmo-service-entra.yaml)）仍然保留，作为备选方案。
 - **每晚自动停机**：部分订阅会在夜间自动停止 AKS 和 PostgreSQL，使用前请先运行 `scripts/00-resume.sh`。
 
 - **产物只能在 VNet 内下载**：Blob 没有公网入口，所以在 VNet 外的工作站上，直接读写存储的 `osmo` 命令无法使用。

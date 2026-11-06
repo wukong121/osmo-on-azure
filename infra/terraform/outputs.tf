@@ -41,6 +41,10 @@ output "postgres_db_name" {
   value = azurerm_postgresql_flexible_server_database.osmo.name
 }
 
+output "postgres_keycloak_db_name" {
+  value = azurerm_postgresql_flexible_server_database.keycloak.name
+}
+
 output "postgres_admin_username" {
   value = var.postgres_admin_username
 }

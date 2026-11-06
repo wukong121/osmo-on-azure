@@ -63,6 +63,25 @@ osmo token list                    # 查看已签发的 token
 osmo token delete <token名称>      # 吊销
 ```
 
+### 浏览器登录（Web UI，需已完成部署第 6 步 Keycloak）
+
+浏览器打开 `https://<OSMO_HOSTNAME>`，页面会跳转到 Keycloak 登录页，用邮箱和密码登录。首次登录时会要求修改初始密码。
+
+### 用户与角色管理（Keycloak）
+
+管理控制台地址：`https://<OSMO_HOSTNAME>/auth/admin`。登录后左上角切换到 realm **osmo**。
+
+| 操作 | 方法 |
+|---|---|
+| 查看初始密码 | 在运行过 06 脚本的机器上执行 `cat ~/.osmo-keycloak-initial-passwords`。这些都是临时密码，首次登录时必须修改 |
+| 管理员登录控制台 | 初始管理员账号存放在 Secret 里：`kubectl get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.username}' \| base64 -d`（把 `username` 换成 `password` 即可读取密码）。这是临时管理员，首次登录后建议在 master realm 中创建正式管理员并开启 OTP，然后删除这个临时账号 |
+| 新增用户 | 控制台 → Users → Add user（用户名和邮箱都填写邮箱地址）→ Groups 加入 `osmo-users` 或 `osmo-admins` → Credentials 设置临时密码 |
+| 调整角色 | 修改用户所属的组：`osmo-admins` 对应 osmo-admin，`osmo-users` 对应 osmo-user。用户需要重新登录才能生效（ID token 有效期内仍沿用旧角色） |
+| 重置密码 / 禁用用户 | 控制台 → Users → 选择用户 → Credentials（Reset password）或者关闭 Enabled 开关 |
+| 用户自助修改密码 | 访问 `https://<OSMO_HOSTNAME>/auth/realms/osmo/account` |
+
+> 浏览器会话的 OSMO 角色只来自 Keycloak 的组。`osmo user update --add-roles` 只对 OSMO 签发的 token 生效，对浏览器用户不起作用。
+
 ---
 
 ## 3. 查看调度记录
@@ -173,5 +192,7 @@ ContainerLogV2
 | `FAILED_EVICTED` | Spot 节点被回收 | 执行 `osmo workflow restart <id>` 重跑 |
 | 产物上传失败（Blob 403 或 SAS 过期） | SAS 轮换器失败超过 7 天 | `kubectl get cronjob,jobs -n osmo`；手动触发一次：`kubectl create job --from=cronjob/osmo-sas-rotator sas-manual -n osmo` |
 | `osmo` 命令报 `127.0.0.1:9000 Connection refused` | CLI 最后一次登录的是 port-forward 地址，而 port-forward 已经结束（例如没有配置公网域名时，`03`/`04` 脚本会临时开 port-forward；配置了域名后，脚本会自动改用域名） | 用公网域名重新登录（见第 2 节） |
+| 浏览器登录后页面空白，或显示 “unable to load”（403） | 该用户在 Keycloak 中不属于 `osmo-users` / `osmo-admins` 组 | 在 Keycloak 控制台把用户加入相应的组，然后让用户退出并重新登录 |
+| 浏览器登录后又被跳回 Keycloak 登录页 | 密码错误、账号被禁用，或者 oauth2-proxy 刚重启 | 核对密码和账号状态，稍后重试 |
 | `osmo login` 返回 401 | 用了错误的 token，或者 token 已过期 | 重新从 `osmo-default-admin` Secret 读取 token 后登录 |
 | `osmo pool list` 显示 `OFFLINE` | backend operator 没有在运行 | `kubectl get pods -n osmo-operator`；执行 `00-resume.sh` 重启 |
