@@ -108,13 +108,17 @@ osmo config show BACKEND default                     # backend 状态（online�
 osmo workflow submit deploy/workflows/hello.yaml --pool default              # CPU 任务
 osmo workflow submit deploy/workflows/storage-roundtrip.yaml --pool default  # 产物上传、下载
 osmo workflow submit deploy/workflows/gpu-t4.yaml --pool default             # T4 GPU 任务
-osmo workflow submit deploy/workflows/isaaclab-cartpole.yaml --pool default  # Isaac Lab 3.0 headless 训练（Cartpole）
+osmo workflow submit deploy/workflows/isaaclab-cartpole.yaml --pool default  # Isaac Lab 3.0 headless 训练（Cartpole，T4）
+osmo workflow submit deploy/workflows/mujoco-sim.yaml --pool default         # MuJoCo headless 仿真（CPU 节点池）
+osmo workflow submit deploy/workflows/gazebo-sim.yaml --pool default         # Gazebo Harmonic headless 仿真（CPU 节点池）
 osmo workflow validate <工作流.yaml> --pool default                          # 只校验，不提交
 osmo workflow cancel <workflow-id>
 osmo workflow restart <workflow-id>                                          # 重跑失败的工作流
 ```
 
-一键跑完全部验收：`deploy/scripts/04-verify.sh`；也可以只跑其中几项：`deploy/scripts/04-verify.sh hello gpu`。
+一键跑完全部验收：`deploy/scripts/04-verify.sh`；也可以只跑其中几项：`deploy/scripts/04-verify.sh hello gpu`；仿真示例：`deploy/scripts/04-verify.sh isaaclab mujoco gazebo`。
+
+> 工作流里通过 `files:` 引用的文件（例如 `files/mujoco_sim.py`）是相对于工作流 YAML 所在目录解析的，所以要用 CLI 提交（UI 不支持文件注入）。
 
 所有 `osmo` 命令都支持加 `-t json` 输出 JSON，方便用 `jq` 处理。
 

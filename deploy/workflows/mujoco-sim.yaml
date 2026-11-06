@@ -1,0 +1,30 @@
+# MuJoCo headless simulation on the CPU platform (npcpu node pool).
+#
+# - Image: python:3.12-slim + the official "mujoco" wheel (CPU, no rendering).
+# - files/mujoco_sim.py: double pendulum + falling boxes, 10 s simulated time; asserts the box
+#   comes to rest on the floor and writes trajectory.csv / summary.txt to {{output}}.
+# - Validated first in a single container on the npcpu node (MuJoCo 3.17.0, ~96k steps/s).
+workflow:
+  name: mujoco-sim
+  timeout:
+    exec_timeout: 15m
+    queue_timeout: 15m
+  resources:
+    cpu2:
+      cpu: 2
+      memory: 4Gi
+      storage: 5Gi
+  tasks:
+  - name: simulate
+    image: python:3.12-slim
+    resource: cpu2
+    files:
+    - localpath: files/mujoco_sim.py
+      path: /opt/sim/mujoco_sim.py
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -euo pipefail
+      pip install --quiet --no-cache-dir "mujoco==3.17.0"
+      SIM_SECONDS=10 python /opt/sim/mujoco_sim.py {{output}}
+      ls -la {{output}}

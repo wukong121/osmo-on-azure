@@ -115,7 +115,15 @@ osmo workflow logs <workflow-id>
 
 | `isaaclab`（可选） | [isaaclab-cartpole.yaml](workflows/isaaclab-cartpole.yaml) | 在 T4 上运行 Isaac Lab 3.0 headless 强化学习训练：官方镜像 `nvcr.io/nvidia/isaac-lab:3.0.0-kitless`，Newton 物理后端（`newton_mjwarp`），rsl_rl 算法，任务 `Isaac-Cartpole`，64 个并行环境，10 次迭代。checkpoint 和 TensorBoard 日志会上传到 Blob | ✅（2026-11-06） |
 
-只跑其中几项：`deploy/scripts/04-verify.sh hello storage`；只跑仿真示例：`deploy/scripts/04-verify.sh isaaclab`。
+| `mujoco`（可选） | [mujoco-sim.yaml](workflows/mujoco-sim.yaml) | 在 CPU 平台（`npcpu`）上运行 MuJoCo 3.17 headless 仿真：双摆加若干下落的盒子，仿真时长 10 秒。校验盒子最终静止在地面上，并上传 `trajectory.csv` 和 `summary.txt` | ✅（2026-11-06） |
+| `gazebo`（可选） | [gazebo-sim.yaml](workflows/gazebo-sim.yaml) | 在 `npcpu` 上以 headless server 模式运行 Gazebo Harmonic（gz-sim 8.11，镜像 `osrf/ros:jazzy-simulation`），执行 [files/falling_shapes.sdf](workflows/files/falling_shapes.sdf) 50,000 次迭代，耗时约 11 秒，并上传录制的 `state.tlog` | ✅（2026-11-06） |
+
+只跑其中几项：`deploy/scripts/04-verify.sh hello storage`；只跑仿真示例：`deploy/scripts/04-verify.sh isaaclab mujoco gazebo`。
+
+关于仿真示例（每个示例都先在目标节点池上用单个容器验证过）：
+- 脚本和世界文件放在 [workflows/files/](workflows/files/) 中，通过 OSMO 的 `files:` 字段注入容器，所以单容器验证和 OSMO 作业运行的是同一份文件。
+- MuJoCo 没有官方容器镜像，作业在 `python:3.12-slim` 基础上安装固定版本的 `mujoco` wheel。
+- Gazebo Classic 已经停止维护，所以示例使用 Gazebo Harmonic。官方示例世界没有 `<physics>` 配置块，会按实时速度运行；示例世界设置了 `real_time_factor=0`，让仿真尽可能快地运行（在 D8s_v4 上约为实时速度的 5 倍）。
 
 以下 Isaac Lab 3.0 的要点已在容器内实际验证：
 - 训练入口统一为 `scripts/reinforcement_learning/train.py --rl_library rsl_rl`。

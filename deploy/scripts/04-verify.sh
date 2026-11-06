@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Step 4: phase-1 acceptance checks. Submits the workflows in deploy/workflows and waits for each.
-#   Usage: 04-verify.sh [hello|storage|gpu|isaaclab ...]   (default: hello storage gpu)
+#   Usage: 04-verify.sh [hello|storage|gpu|isaaclab|mujoco|gazebo ...]   (default: hello storage gpu)
+#   Simulation samples: 04-verify.sh isaaclab mujoco gazebo
 source "$(dirname "$0")/lib.sh"
 require jq osmo
 load_tf_outputs
@@ -40,9 +41,9 @@ run_workflow() {
   return 1
 }
 
-declare -A SPEC=( [hello]=hello.yaml [storage]=storage-roundtrip.yaml [gpu]=gpu-t4.yaml [isaaclab]=isaaclab-cartpole.yaml )
+declare -A SPEC=( [hello]=hello.yaml [storage]=storage-roundtrip.yaml [gpu]=gpu-t4.yaml [isaaclab]=isaaclab-cartpole.yaml [mujoco]=mujoco-sim.yaml [gazebo]=gazebo-sim.yaml )
 # GPU timeout covers Spot node scale-up from zero + driver install (~10-15 min)
-declare -A TIMEOUT=( [hello]=600 [storage]=900 [gpu]=2400 [isaaclab]=2400 )
+declare -A TIMEOUT=( [hello]=600 [storage]=900 [gpu]=2400 [isaaclab]=2400 [mujoco]=900 [gazebo]=900 )
 
 checks=("$@"); [[ $# -eq 0 ]] && checks=(hello storage gpu)
 

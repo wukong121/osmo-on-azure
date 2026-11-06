@@ -115,7 +115,15 @@ The gateway was also checked directly:
 
 | `isaaclab` (optional) | [isaaclab-cartpole.yaml](workflows/isaaclab-cartpole.yaml) | Isaac Lab 3.0 headless RL training (official `nvcr.io/nvidia/isaac-lab:3.0.0-kitless` image, Newton `newton_mjwarp` physics, rsl_rl, `Isaac-Cartpole`, 64 envs, 10 iterations) on T4. Checkpoints and TensorBoard logs are uploaded to Blob. | ✅ (2026-11-06) |
 
-Run a subset with `deploy/scripts/04-verify.sh hello storage`, or the simulation sample with `deploy/scripts/04-verify.sh isaaclab`.
+| `mujoco` (optional) | [mujoco-sim.yaml](workflows/mujoco-sim.yaml) | MuJoCo 3.17 headless simulation on the CPU platform (`npcpu`): double pendulum plus falling boxes, 10 s simulated. Checks that the boxes come to rest and uploads `trajectory.csv` and `summary.txt`. | ✅ (2026-11-06) |
+| `gazebo` (optional) | [gazebo-sim.yaml](workflows/gazebo-sim.yaml) | Gazebo Harmonic (gz-sim 8.11, `osrf/ros:jazzy-simulation`) headless server on `npcpu`: 50,000 iterations of [files/falling_shapes.sdf](workflows/files/falling_shapes.sdf) in about 11 s. Uploads the recorded `state.tlog`. | ✅ (2026-11-06) |
+
+Run a subset with `deploy/scripts/04-verify.sh hello storage`, or the simulation samples with `deploy/scripts/04-verify.sh isaaclab mujoco gazebo`.
+
+Simulation samples (each was first validated in a single container on the target node pool):
+- Scripts and worlds live in [workflows/files/](workflows/files/) and are injected with the OSMO `files:` field, so the single-container test and the OSMO workflow run the same files.
+- MuJoCo has no official container image. The workflow installs the pinned `mujoco` wheel on `python:3.12-slim`.
+- Gazebo Classic is EOL, so the sample uses Gazebo Harmonic. The stock example worlds have no `<physics>` block and run in real time; the sample world sets `real_time_factor=0` to run as fast as possible (about 5× real time on D8s_v4).
 
 Isaac Lab 3.0 notes, verified in the container:
 - Training uses the unified `scripts/reinforcement_learning/train.py --rl_library rsl_rl`.

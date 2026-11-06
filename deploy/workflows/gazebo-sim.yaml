@@ -1,0 +1,37 @@
+# Gazebo (Harmonic, gz-sim 8) headless server simulation on the CPU platform (npcpu node pool).
+#
+# - Image: osrf/ros:jazzy-simulation (ROS 2 Jazzy + Gazebo Harmonic). Gazebo Classic is EOL.
+# - Server only (gz sim -s), no GUI, no rendering sensors.
+# - files/falling_shapes.sdf: ground + falling shapes with real_time_factor=0 (runs as fast as
+#   possible; stock example worlds have no <physics> block and run in real time).
+# - 50,000 iterations (50 s simulated) with the state log recorded to {{output}}/gz-log.
+# - Validated first in a single container on the npcpu node (~11 s wall, ~5x real time).
+workflow:
+  name: gazebo-sim
+  timeout:
+    exec_timeout: 15m
+    queue_timeout: 15m
+  resources:
+    cpu2:
+      cpu: 2
+      memory: 4Gi
+      storage: 10Gi
+  tasks:
+  - name: simulate
+    image: osrf/ros:jazzy-simulation
+    resource: cpu2
+    files:
+    - localpath: files/falling_shapes.sdf
+      path: /opt/sim/falling_shapes.sdf
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -eo pipefail
+      source /opt/ros/jazzy/setup.bash
+      gz sim --versions
+      export GZ_PARTITION="osmo-$(hostname)"
+      start=$(date +%s%3N)
+      gz sim -s -r --iterations 50000 --record-path {{output}}/gz-log -v 2 /opt/sim/falling_shapes.sdf
+      echo "50000 iterations in $(( $(date +%s%3N) - start )) ms"
+      test -s {{output}}/gz-log/state.tlog
+      ls -la {{output}}/gz-log
