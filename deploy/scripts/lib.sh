@@ -21,7 +21,9 @@ NS_WORKFLOWS="osmo-workflows"
 OPERATOR_RELEASE="osmo-operator"
 
 OSMO_LOCAL_PORT="${OSMO_LOCAL_PORT:-9000}"
-OSMO_URL="http://127.0.0.1:${OSMO_LOCAL_PORT}"
+# OSMO endpoint. Leave unset to auto-detect: the public hostname (step 5) if configured,
+# otherwise a temporary kubectl port-forward on 127.0.0.1:${OSMO_LOCAL_PORT}.
+OSMO_URL="${OSMO_URL:-}"
 
 info()  { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
 ok()    { printf '\033[1;32m[ OK ]\033[0m %s\n' "$*"; }
@@ -68,9 +70,25 @@ apply_secret() {
 
 secret_value() { kubectl get secret "$2" -n "$1" -o jsonpath="{.data.$3}" 2>/dev/null | base64 -d; }
 
-# Port-forward the OSMO gateway to localhost in the background; stopped on exit.
+# Connect to the OSMO gateway and set OSMO_URL.
+# Prefers OSMO_URL if set and reachable, then the public hostname (Ingress osmo/osmo-public).
+# Without either it falls back to a temporary port-forward; the CLI login then points at
+# 127.0.0.1, which stops working when the script exits (log in again afterwards).
 PF_PID=""
 start_port_forward() {
+  local host
+  if [[ -z "$OSMO_URL" ]]; then
+    host="$(kubectl get ingress osmo-public -n "$NS_OSMO" -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || true)"
+    if [[ -n "$host" ]] && curl -fsS --max-time 10 "https://$host/api/version" >/dev/null 2>&1; then
+      OSMO_URL="https://$host"
+      ok "Using public endpoint $OSMO_URL"
+      return 0
+    fi
+  elif curl -fsS --max-time 10 "$OSMO_URL/api/version" >/dev/null 2>&1; then
+    ok "Using OSMO_URL=$OSMO_URL"
+    return 0
+  fi
+  OSMO_URL="http://127.0.0.1:${OSMO_LOCAL_PORT}"
   info "Port-forwarding osmo-gateway to $OSMO_URL"
   kubectl port-forward -n "$NS_OSMO" svc/osmo-gateway "${OSMO_LOCAL_PORT}:80" >/tmp/osmo-port-forward.log 2>&1 &
   PF_PID=$!

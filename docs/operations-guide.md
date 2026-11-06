@@ -172,6 +172,6 @@ ContainerLogV2
 | 工作流长时间停在 `PENDING` | 节点正在扩容、在拉镜像，或 Spot 容量不足 | 用 `osmo workflow events <id>` 和 `kubectl get events -n osmo-workflows` 排查 |
 | `FAILED_EVICTED` | Spot 节点被回收 | 执行 `osmo workflow restart <id>` 重跑 |
 | 产物上传失败（Blob 403 或 SAS 过期） | SAS 轮换器失败超过 7 天 | `kubectl get cronjob,jobs -n osmo`；手动触发一次：`kubectl create job --from=cronjob/osmo-sas-rotator sas-manual -n osmo` |
-| 跑完 `04-verify.sh` 后，`osmo` 命令报 `127.0.0.1:9000 Connection refused` | 验收脚本把 CLI 登录到了它临时开的 port-forward 地址，脚本结束后这个地址就失效了 | 用公网域名重新登录（见第 2 节） |
+| `osmo` 命令报 `127.0.0.1:9000 Connection refused` | CLI 最后一次登录的是 port-forward 地址，而 port-forward 已经结束（例如没有配置公网域名时，`03`/`04` 脚本会临时开 port-forward；配置了域名后，脚本会自动改用域名） | 用公网域名重新登录（见第 2 节） |
 | `osmo login` 返回 401 | 用了错误的 token，或者 token 已过期 | 重新从 `osmo-default-admin` Secret 读取 token 后登录 |
 | `osmo pool list` 显示 `OFFLINE` | backend operator 没有在运行 | `kubectl get pods -n osmo-operator`；执行 `00-resume.sh` 重启 |
