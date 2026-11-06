@@ -169,6 +169,22 @@ ContainerLogV2
 | order by TimeGenerated desc
 ```
 
+## 8.1 AzureML：查看训练、模型和验证结果
+
+闭环工作流（`deploy/scripts/07-azureml-loop.sh`，说明见 [azureml-loop.md](azureml-loop.md)）把记录写进 AzureML 工作区（`terraform output aml_workspace_name`）。打开 https://ml.azure.com 并选择该工作区：
+
+- **Jobs → 实验 `cartpole-rl`**：训练运行的奖励、损失曲线和超参数；子运行 `sim2sim-mujoco` 是仿真验证结果。
+- **Models → `cartpole-policy`**：按标签 `sim2sim_validation` 查看每个版本是否通过验证，`osmo_workflow_id` 指向产生它的 OSMO 工作流。
+- **Data → `cartpole-sim2sim-scenarios`**：验证集版本。
+
+命令行查看：
+
+```bash
+az ml model list -n cartpole-policy -g <资源组> -w <工作区> --query "[].{v:version,result:tags.sim2sim_validation,rate:tags.sim2sim_success_rate,wf:tags.osmo_workflow_id}" -o table
+```
+
+AzureML 存储和数据湖只走私网，从 VNet 外无法在 Studio 里预览产物文件，但指标、标签和血缘可以正常查看。
+
 ---
 
 ## 9. 成本控制
@@ -189,7 +205,8 @@ ContainerLogV2
 | `Value ... too high for CPU` | CPU 节点池 `npcpu` 的空闲 CPU 不够 | `osmo resource list -p default -m free` 查看空闲资源；调大 `cpu_node_min_count` 或换更大的 `cpu_node_vm_size`；或者减小工作流中 `cpu` 的申请量 |
 | 新增节点后 `osmo resource list` 里看不到；或者节点明明空闲，提交时却报 `too high` | backend operator 的节点缓存过期了（例如还在统计一个已经在 OSMO 之外被删掉的 Pod） | `kubectl rollout restart deploy -n osmo-operator` |
 | 工作流长时间停在 `PENDING` | 节点正在扩容、在拉镜像，或 Spot 容量不足 | 用 `osmo workflow events <id>` 和 `kubectl get events -n osmo-workflows` 排查 |
-| `FAILED_EVICTED` | Spot 节点被回收 | 执行 `osmo workflow restart <id>` 重跑 |
+| `rl-train-validate` 的 register / validate 报 `AuthorizationFailed` 或 403 | `id-osmo` 的 AzureML 角色还没生效，或 `azureml.tf` 没有 apply | 确认 `terraform apply` 已完成；新角色分配可能需要几分钟生效 |
+| `FAILED_EVICTED` 或 `FAILED_BACKEND_ERROR`（事件中有 `preempt`） | Spot 节点被回收 | 执行 `osmo workflow restart <id>` 重跑 |
 | 产物上传失败（Blob 403 或 SAS 过期） | SAS 轮换器失败超过 7 天 | `kubectl get cronjob,jobs -n osmo`；手动触发一次：`kubectl create job --from=cronjob/osmo-sas-rotator sas-manual -n osmo` |
 | `osmo` 命令报 `127.0.0.1:9000 Connection refused` | CLI 最后一次登录的是 port-forward 地址，而 port-forward 已经结束（例如没有配置公网域名时，`03`/`04` 脚本会临时开 port-forward；配置了域名后，脚本会自动改用域名） | 用公网域名重新登录（见第 2 节） |
 | 浏览器登录后页面空白，或显示 “unable to load”（403） | 该用户在 Keycloak 中不属于 `osmo-users` / `osmo-admins` 组 | 在 Keycloak 控制台把用户加入相应的组，然后让用户退出并重新登录 |

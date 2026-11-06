@@ -112,3 +112,32 @@ osmo_admin_login() {
   osmo login "$OSMO_URL" --method token --token-file <(printf "%s" "$token") >/dev/null
   ok "Logged in to OSMO as admin"
 }
+
+# Submit an OSMO workflow and wait for it to finish.
+#   run_workflow <spec> <timeout seconds> [extra "osmo workflow submit" args, e.g. --set-string k=v]
+POOL="${POOL:-default}"
+POLL_INTERVAL="${POLL_INTERVAL:-10}"
+run_workflow() {
+  local spec="$1" timeout="$2" out wf status=""
+  shift 2
+  info "Submitting $(basename "$spec") to pool $POOL"
+  out="$(osmo workflow submit "$spec" --pool "$POOL" -t json "$@" 2>&1)" || { echo "$out" >&2; return 1; }
+  wf="$(printf '%s\n' "$out" | sed -n '/^{/,/^}/p' | jq -r '.name // .id // .workflow_id // empty')"
+  [[ -n "$wf" ]] || { echo "$out" >&2; fatal "could not parse workflow id"; }
+  info "  workflow: $wf"
+  local deadline=$(( $(date +%s) + timeout ))
+  while (( $(date +%s) < deadline )); do
+    status="$(osmo workflow query "$wf" -t json 2>/dev/null | sed -n '/^{/,/^}/p' | jq -r '.status // .state // "UNKNOWN"')" || status="UNKNOWN"
+    case "$status" in
+      COMPLETED) ok "$wf COMPLETED"; osmo workflow logs "$wf" 2>/dev/null | tail -20 || true; return 0 ;;
+      FAILED*|CANCELED|CANCELLED)
+        warn "$wf ended in $status"
+        osmo workflow events "$wf" >&2 || true
+        osmo workflow logs "$wf" >&2 || true
+        return 1 ;;
+    esac
+    sleep "$POLL_INTERVAL"
+  done
+  warn "$wf did not finish within ${timeout}s (last status: $status)"
+  return 1
+}

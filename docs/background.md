@@ -149,4 +149,6 @@ Isaac Sim 的 RTX 渲染和相机类作业在 T4 上能不能跑还不确定，�
 - [x] Isaac Lab 示例作业 → Isaac Lab 3.0 + Newton + Cartpole headless 在 T4 上作为 OSMO 作业跑通（2026-11-06）
 - [x] MuJoCo / Gazebo 示例作业 → MuJoCo 3.17 与 Gazebo Harmonic（gz-sim 8.11）headless 仿真在 CPU 节点池上作为 OSMO 作业跑通（2026-11-06）
 - [ ] OSMO 6.4 发布后升级，去掉 workflow_data SAS 轮换器
+- [x] 提高 Azure 粘性：接入 AzureML，打通 数据 → 仿真 → 训练 → 验证 闭环（2026-11-06）。客户数据实际在日本，PoC 在 westus3 用 ADLS Gen2 数据湖模拟；训练用 Isaac Lab 强化学习示例；“验证”指仿真验证（训练出的策略放到 MuJoCo / Gazebo 上验证）；假定客户没有实验管理和模型管理工具，由 AzureML 承担。详见 [azureml-loop.md](azureml-loop.md)
+- [ ] （可选）Gazebo 仿真验证：需要 ROS 2 控制接口
 - [x] PostgreSQL TLS → 可以开启

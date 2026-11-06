@@ -70,20 +70,34 @@ locals {
     # 数据组件（全局唯一）
     key_vault       = "kv-${local.base_name}-${local.unique_suffix}"
     storage_account = "st${local.base_name_compact}${local.unique_suffix}"
+    storage_aml     = "st${local.base_name_compact}ml${local.unique_suffix}"
+    storage_data    = "st${local.base_name_compact}dl${local.unique_suffix}"
     pgsql           = "pgsql-${local.base_name}-${local.unique_suffix}"
     amr             = "amr-${local.base_name}-${local.unique_suffix}"
 
     # 私有终结点（pep）及其网卡（nic）
-    pep_kv       = "pep-${local.base_name}-kv"
-    pep_blob     = "pep-${local.base_name}-blob"
-    pep_amr      = "pep-${local.base_name}-amr"
-    nic_pep_kv   = "nic-pep-${local.base_name}-kv"
-    nic_pep_blob = "nic-pep-${local.base_name}-blob"
-    nic_pep_amr  = "nic-pep-${local.base_name}-amr"
+    pep_kv            = "pep-${local.base_name}-kv"
+    pep_blob          = "pep-${local.base_name}-blob"
+    pep_amr           = "pep-${local.base_name}-amr"
+    nic_pep_kv        = "nic-pep-${local.base_name}-kv"
+    nic_pep_blob      = "nic-pep-${local.base_name}-blob"
+    nic_pep_amr       = "nic-pep-${local.base_name}-amr"
+    pep_mlw           = "pep-${local.base_name}-mlw"
+    nic_pep_mlw       = "nic-pep-${local.base_name}-mlw"
+    pep_aml_blob      = "pep-${local.base_name}-mlst-blob"
+    nic_pep_aml_blob  = "nic-pep-${local.base_name}-mlst-blob"
+    pep_aml_file      = "pep-${local.base_name}-mlst-file"
+    nic_pep_aml_file  = "nic-pep-${local.base_name}-mlst-file"
+    pep_data_blob     = "pep-${local.base_name}-dl-blob"
+    nic_pep_data_blob = "nic-pep-${local.base_name}-dl-blob"
+    pep_data_dfs      = "pep-${local.base_name}-dl-dfs"
+    nic_pep_data_dfs  = "nic-pep-${local.base_name}-dl-dfs"
 
     # 监控
     log_analytics          = "log-${local.base_name}"
     dcr_container_insights = "dcr-${local.base_name}-ci"
+    mlw                    = "mlw-${local.base_name}"
+    appi                   = "appi-${local.base_name}"
   }
 }
 
@@ -103,6 +117,10 @@ resource "terraform_data" "naming_validation" {
     precondition {
       condition     = can(regex("^[a-z0-9]{3,24}$", local.names.storage_account))
       error_message = "存储账号名称 ${local.names.storage_account} 不合法：3-24 位小写字母数字。请缩短 workload / environment。"
+    }
+    precondition {
+      condition     = can(regex("^[a-z0-9]{3,24}$", local.names.storage_aml)) && can(regex("^[a-z0-9]{3,24}$", local.names.storage_data))
+      error_message = "AzureML / 数据湖存储账号名称 ${local.names.storage_aml} / ${local.names.storage_data} 不合法：3-24 位小写字母数字。请缩短 workload / environment。"
     }
     precondition {
       condition     = length(local.names.pgsql) <= 63 && length(local.names.amr) <= 63

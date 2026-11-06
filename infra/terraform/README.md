@@ -21,6 +21,8 @@ _Edges: green = private (VNet / Private Link) · orange dashed = public entry (A
 | System node pool (`npsystem`) | — | `Standard_D8s_v4` × 1–3. Runs the platform only: OSMO control plane, Traefik, KAI, GPU Operator controllers and policy-injected components. |
 | CPU task node pool (`npcpu`) | — | `Standard_D8s_v4` × 1–3, with taint `osmo/workload=cpu:NoSchedule`. Dedicated to OSMO CPU tasks (the `default` platform). Keep at least 1 node, because OSMO rejects tasks for a platform that has no free capacity. |
 | Public ingress (Traefik) | Static public IP `pip-<base>-ingress`, plus NSG `nsg-<base>-aks` on `snet-aks` | Only 80/443 to the ingress IP are allowed from the Internet. Traefik binds to this IP (see deploy/README.md, step 5). |
+| AzureML workspace (`azureml.tf`) | Public endpoint with Entra ID + RBAC (`aml_public_network_access_enabled`, default on, so Studio works in a browser), plus a private endpoint | Basic SKU, system-assigned identity, identity-based access to its default storage (no Shared Key). System of record for experiments (MLflow), models and data assets. The AzureML AKS extension is **not** installed: OSMO stays the executor. |
+| AzureML default storage / robotics data lake (ADLS Gen2) | Private only (private endpoints: blob + file / blob + dfs) | Shared Key disabled. The data lake simulates the customer's robot data store and is registered as the AzureML datastore `robotics_data` (identity-based). |
 
 Azure Container Registry is out of scope for phase 1. Images are pulled directly from nvcr.io.
 
@@ -57,6 +59,9 @@ Default names (`<sfx>` is the unique suffix):
 | Key Vault | `kv-osmo-poc-wus3-<sfx>` |
 | Private endpoints / NICs | `pep-osmo-poc-wus3-{kv,blob,amr}` / `nic-pep-osmo-poc-wus3-{kv,blob,amr}` |
 | Log Analytics / DCR | `log-osmo-poc-wus3` / `dcr-osmo-poc-wus3-ci` |
+| AzureML workspace / Application Insights | `mlw-osmo-poc-wus3` / `appi-osmo-poc-wus3` |
+| AzureML storage / data lake (container) | `stosmopocwus3ml<sfx>` / `stosmopocwus3dl<sfx>` (`robotics-data`) |
+| AzureML private endpoints | `pep-osmo-poc-wus3-{mlw,mlst-blob,mlst-file,dl-blob,dl-dfs}` |
 
 Some names are fixed and do not follow these variables:
 - The `privatelink.*` private DNS zones (names set by Azure)
@@ -115,6 +120,8 @@ kubectl get nodes
 | `storage_account_name` / `storage_container_name` / `storage_blob_endpoint` | Storage for OSMO workflow data, logs and artifacts |
 | `postgres_admin_password` / `redis_primary_key` | Sensitive. Read by `deploy/scripts/02-osmo-service.sh` and stored as Kubernetes Secrets |
 | `key_vault_name` / `key_vault_uri` | Private Key Vault for later Key Vault CSI integration |
+| `aml_workspace_name` / `aml_workspace_id` | AzureML workspace used by `deploy/scripts/07-azureml-loop.sh` |
+| `data_lake_account_name` / `data_lake_container_name` / `data_lake_datastore_name` | Robotics data lake and its AzureML datastore |
 
 ## Notes
 
@@ -129,3 +136,4 @@ kubectl get nodes
 
 - 2026-11-05: With azurerm 5.12.0, azapi 2.13.0 and Terraform 1.17.1, `terraform validate` passed and `terraform plan` against the target subscription passed (48 resources). Not applied yet.
 - 2026-11-05: Naming switched to the CAF convention (`naming.tf`). `validate` and `plan` passed again.
+- 2026-11-06: AzureML integration (`azureml.tf`) applied: 23 resources added, none replaced. The OSMO identity gets `AzureML Data Scientist` on the workspace and `Storage Blob Data Contributor` on the AzureML storage and the data lake.
