@@ -19,7 +19,7 @@ _连线说明：绿色 = 私网（VNet / Private Link）· 橙色虚线 = 公网
 | [docs/operations-guide.md](docs/operations-guide.md) | 操作手册：恢复环境、登录、查看调度记录和日志、资源查看、成本控制、常见问题 |
 | [docs/azureml-loop.md](docs/azureml-loop.md) | OSMO + AzureML 闭环：数据湖 → T4 上 Isaac Lab 训练 → MLflow 实验跟踪和模型注册 → MuJoCo sim2sim 验证 |
 | [docs/t4-feasibility.md](docs/t4-feasibility.md) | T4 GPU 运行 Isaac Lab / Isaac Sim / MuJoCo / Gazebo 的可行性评估 |
-| [docs/images/](docs/images/) | Azure 部署架构图、OSMO 部署架构图、工作流时序图 |
+| [docs/images/](docs/images/) | Azure 部署架构图、OSMO + AzureML 闭环时序图、OSMO 部署架构图、工作流时序图 |
 | [infra/terraform/](infra/terraform/README.zh-CN.md) | Azure 基础设施：AKS（系统池、CPU 池、T4 Spot GPU 池）、私网数据组件、固定入口 IP、AzureML 工作区和机器人数据湖 |
 | [deploy/](deploy/README.zh-CN.md) | OSMO 6.3.1 部署（GPU Operator、KAI、OSMO service、backend operator、Traefik、Keycloak）、验收检查与仿真示例 |
 

@@ -19,7 +19,7 @@ _Edges: green = private (VNet / Private Link) · orange dashed = public entry (A
 | [docs/operations-guide.md](docs/operations-guide.md) (Chinese) | Operations guide: resume the environment, log in, view workflow history and logs, check resources, cost control, troubleshooting |
 | [docs/azureml-loop.md](docs/azureml-loop.md) (Chinese) | OSMO + AzureML closed loop: data lake → Isaac Lab training on T4 → MLflow tracking and model registry → MuJoCo sim2sim validation |
 | [docs/t4-feasibility.md](docs/t4-feasibility.md) (Chinese) | Feasibility of running Isaac Lab / Isaac Sim / MuJoCo / Gazebo on T4 GPUs |
-| [docs/images/](docs/images/) | Azure architecture, OSMO deployment architecture, OSMO workflow sequence |
+| [docs/images/](docs/images/) | Azure architecture, OSMO + AzureML closed-loop sequence, OSMO deployment architecture, OSMO workflow sequence |
 | [infra/terraform/](infra/terraform/README.md) | Azure infrastructure: AKS (system, CPU and T4 Spot GPU pools), private data services, static ingress IP, AzureML workspace and robotics data lake |
 | [deploy/](deploy/README.md) | OSMO 6.3.1 deployment (GPU Operator, KAI, OSMO service, backend operator, Traefik, Keycloak), acceptance checks and simulation samples |
 
