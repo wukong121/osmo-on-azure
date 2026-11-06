@@ -1,0 +1,34 @@
+<!--
+  MuJoCo port of the Isaac Lab "Isaac-Cartpole" robot, used for sim2sim validation.
+
+  Values come from the Isaac Lab cartpole asset (Robots/Classic/Cartpole/cartpole.usd) and
+  isaaclab_assets/robots/cartpole.py:
+    - cart: box 0.20 x 0.25 x 0.20 m, 1 kg; prismatic joint, limits +-4 m
+    - pole: box 0.04 x 0.06 x 1.0 m, 1 kg, center of mass 0.47 m above the hinge
+    - slider actuator: implicit, stiffness 0, damping 10, effort limit 400 N
+    - physics dt 1/120 s; the policy runs every 2 physics steps (60 Hz)
+  In the USD the cart moves along +Y and the pole hinges about +X; here the cart moves along +X,
+  so the hinge axis is -Y to keep the same sign convention (positive pole angle tilts the tip
+  toward the negative cart direction).
+-->
+<mujoco model="cartpole">
+  <compiler angle="radian" inertiafromgeom="true"/>
+  <option timestep="0.008333333333" gravity="0 0 -9.81" integrator="implicitfast"/>
+  <default>
+    <geom contype="0" conaffinity="0"/>
+  </default>
+  <worldbody>
+    <geom name="rail" type="box" size="4 0.015 0.015" pos="0 0 2" rgba="0.5 0.5 0.5 1"/>
+    <body name="cart" pos="0 0 2">
+      <joint name="slider_to_cart" type="slide" axis="1 0 0" range="-4 4" limited="true" damping="10"/>
+      <geom name="cart" type="box" size="0.125 0.1 0.1" mass="1" rgba="0.2 0.4 0.8 1"/>
+      <body name="pole" pos="0 -0.12 0">
+        <joint name="cart_to_pole" type="hinge" axis="0 -1 0"/>
+        <geom name="pole" type="box" size="0.03 0.02 0.5" pos="0 0 0.47" mass="1" rgba="0.9 0.6 0.2 1"/>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <motor name="cart_force" joint="slider_to_cart" gear="1" ctrllimited="true" ctrlrange="-400 400"/>
+  </actuator>
+</mujoco>

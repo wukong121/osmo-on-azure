@@ -21,6 +21,8 @@ _连线说明：绿色 = 私网（VNet / Private Link）· 橙色虚线 = 公网
 | 系统节点池（`npsystem`） | — | `Standard_D8s_v4` × 1–3，只运行平台组件：OSMO 控制面、Traefik、KAI、GPU Operator 控制器，以及订阅策略注入的组件 |
 | CPU 作业节点池（`npcpu`） | — | `Standard_D8s_v4` × 1–3，带 taint `osmo/workload=cpu:NoSchedule`，专门运行 OSMO 的 CPU 任务（`default` 平台）。请至少保留 1 台：平台没有空闲资源时，OSMO 会直接拒绝提交 |
 | 公网入口（Traefik） | 固定公网 IP `pip-<base>-ingress`，以及 `snet-aks` 上的 NSG `nsg-<base>-aks` | 只允许来自 Internet、访问入口 IP 80/443 端口的流量。Traefik 绑定到这个 IP（见 deploy/README.zh-CN.md 第 5 步） |
+| AzureML 工作区（`azureml.tf`） | 公网端点（Entra ID + RBAC 保护，由 `aml_public_network_access_enabled` 控制，默认开启，便于在浏览器里使用 Studio），另有私有终结点 | Basic SKU，系统分配标识，默认存储用 Identity 访问（不用 Shared Key）。作为实验（MLflow）、模型和数据资产的记录系统。**不安装** AzureML 的 AKS 扩展，执行仍由 OSMO 负责 |
+| AzureML 默认存储 / 机器人数据湖（ADLS Gen2） | 仅私网（私有终结点：blob + file / blob + dfs） | 禁用 Shared Key。数据湖模拟客户的机器人数据存储，注册为 AzureML 数据存储 `robotics_data`（Identity 访问） |
 
 ACR 不在第一阶段范围内，镜像直接从 nvcr.io 拉取。
 
@@ -57,6 +59,9 @@ ACR 不在第一阶段范围内，镜像直接从 nvcr.io 拉取。
 | Key Vault | `kv-osmo-poc-wus3-<sfx>` |
 | 私有终结点 / 网卡 | `pep-osmo-poc-wus3-{kv,blob,amr}` / `nic-pep-osmo-poc-wus3-{kv,blob,amr}` |
 | Log Analytics / DCR | `log-osmo-poc-wus3` / `dcr-osmo-poc-wus3-ci` |
+| AzureML 工作区 / Application Insights | `mlw-osmo-poc-wus3` / `appi-osmo-poc-wus3` |
+| AzureML 存储 / 数据湖（容器） | `stosmopocwus3ml<sfx>` / `stosmopocwus3dl<sfx>`（`robotics-data`） |
+| AzureML 相关私有终结点 | `pep-osmo-poc-wus3-{mlw,mlst-blob,mlst-file,dl-blob,dl-dfs}` |
 
 固定名称（不随变量变化）：私有 DNS 区域 `privatelink.*`（Azure 规定）、DCR 关联 `ContainerInsightsExtension`
 （Container Insights 约定）、
@@ -114,6 +119,8 @@ kubectl get nodes
 | `storage_account_name` / `storage_container_name` / `storage_blob_endpoint` | OSMO 工作流数据、日志、产物存储 |
 | `postgres_admin_password` / `redis_primary_key` | 敏感输出，由 `deploy/scripts/02-osmo-service.sh` 读取并写入 K8s Secret |
 | `key_vault_name` / `key_vault_uri` | 私网 Key Vault，供后续接入 Key Vault CSI |
+| `aml_workspace_name` / `aml_workspace_id` | AzureML 工作区，`deploy/scripts/07-azureml-loop.sh` 使用 |
+| `data_lake_account_name` / `data_lake_container_name` / `data_lake_datastore_name` | 机器人数据湖及其 AzureML 数据存储 |
 
 ## 注意事项
 
@@ -132,3 +139,4 @@ kubectl get nodes
 - 2026-11-05：azurerm 5.12.0 / azapi 2.13.0 / Terraform 1.17.1，`terraform validate` 通过，
   对目标订阅 `terraform plan` 通过（48 个资源）。尚未 apply。
 - 2026-11-05：命名改为 CAF 规范（`naming.tf`），validate 和 plan 再次通过。
+- 2026-11-06：AzureML 集成（`azureml.tf`）已 apply：新增 23 个资源，没有替换。OSMO 身份获得工作区的 `AzureML Data Scientist`，以及 AzureML 存储和数据湖的 `Storage Blob Data Contributor`。

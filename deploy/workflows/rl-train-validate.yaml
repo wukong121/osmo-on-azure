@@ -1,0 +1,129 @@
+# Closed loop on OSMO + AzureML: train (Isaac Lab, T4) -> register (AzureML) -> sim2sim validate (MuJoCo).
+#
+#   train     Isaac Lab 3.0 headless PPO (RSL-RL) on Isaac-Cartpole, then export the policy to
+#             ONNX with Isaac Lab's play script (stopped as soon as the export is written).
+#   register  Replay the TensorBoard metrics into an MLflow run in the AzureML workspace, upload
+#             the ONNX policy + checkpoint + configs, and register model <model_name> with
+#             tag sim2sim_validation=pending.
+#   validate  Resolve the AzureML data asset <dataset> (MuJoCo model + scenarios in the data lake),
+#             run the ONNX policy in MuJoCo for every scenario, log an MLflow run, and tag the
+#             model version sim2sim_validation=passed|failed. Fails the task below <threshold>.
+#
+# OSMO stays the executor (scheduling, GPU, artifacts in Blob); AzureML is the system of record
+# (experiments, model registry, data assets). All Azure access uses the pod's Workload Identity.
+# Run deploy/workflows/azureml-seed-data.yaml once first. Submit with
+# deploy/scripts/07-azureml-loop.sh, which fills in the workspace coordinates from Terraform.
+workflow:
+  name: rl-train-validate
+  timeout:
+    exec_timeout: 60m
+    queue_timeout: 30m
+  resources:
+    one_t4:
+      platform: t4
+      gpu: 1
+      cpu: 4
+      memory: 24Gi
+      storage: 30Gi
+    cpu2:
+      cpu: 2
+      memory: 4Gi
+      storage: 5Gi
+  tasks:
+  - name: train
+    image: nvcr.io/nvidia/isaac-lab:3.0.0-kitless
+    resource: one_t4
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -euo pipefail
+      cd /workspace/isaaclab
+      python scripts/reinforcement_learning/train.py --rl_library rsl_rl --task Isaac-Cartpole \
+        --num_envs {{num_envs}} --max_iterations {{max_iterations}}
+      RUN_DIR=$(ls -td logs/rsl_rl/cartpole/*/ | head -1); RUN_DIR=${RUN_DIR%/}
+      CKPT=$(ls -v "$RUN_DIR"/model_*.pt | tail -1)
+      echo "Exporting $CKPT to ONNX"
+      # play.py exports exported/policy.onnx before it starts the (endless) playback loop
+      python scripts/reinforcement_learning/play.py --rl_library rsl_rl --task Isaac-Cartpole \
+        --num_envs 1 --checkpoint "$CKPT" > /tmp/play.log 2>&1 &
+      PID=$!
+      for _ in $(seq 1 120); do
+        [ -f "$RUN_DIR/exported/policy.onnx" ] && break
+        kill -0 "$PID" 2>/dev/null || break
+        sleep 5
+      done
+      sleep 5; kill "$PID" 2>/dev/null || true; wait "$PID" 2>/dev/null || true
+      test -f "$RUN_DIR/exported/policy.onnx" || { tail -50 /tmp/play.log; exit 1; }
+      mkdir -p {{output}}
+      cp -r logs/rsl_rl {{output}}/
+      find {{output}} -type f | sort
+
+  - name: register
+    image: python:3.12-slim
+    resource: cpu2
+    inputs:
+    - task: train
+    files:
+    - localpath: files/rl/aml_common.py
+      path: /opt/rl/aml_common.py
+    - localpath: files/rl/register_model.py
+      path: /opt/rl/register_model.py
+    environment:
+      AML_SUBSCRIPTION_ID: "{{aml_subscription_id}}"
+      AML_RESOURCE_GROUP: "{{aml_resource_group}}"
+      AML_WORKSPACE: "{{aml_workspace}}"
+      OSMO_WORKFLOW_ID: "{{workflow_id}}"
+      GIT_PYTHON_REFRESH: quiet  # mlflow probes for git; the image has none
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -euo pipefail
+      pip install --quiet --no-cache-dir azure-ai-ml==1.35.2 azure-identity==1.27.0 \
+        mlflow-skinny==3.15.0 azureml-mlflow==1.62.0.post6 tensorboard==2.21.0 pyyaml
+      cd /opt/rl
+      python register_model.py {{input:0}} {{output}} \
+        --model-name "{{model_name}}" --experiment "{{experiment}}"
+      cat {{output}}/model.json
+
+  - name: validate
+    image: python:3.12-slim
+    resource: cpu2
+    inputs:
+    - task: train
+    - task: register
+    files:
+    - localpath: files/rl/aml_common.py
+      path: /opt/rl/aml_common.py
+    - localpath: files/rl/data_assets.py
+      path: /opt/rl/data_assets.py
+    - localpath: files/rl/validate_mujoco.py
+      path: /opt/rl/validate_mujoco.py
+    environment:
+      AML_SUBSCRIPTION_ID: "{{aml_subscription_id}}"
+      AML_RESOURCE_GROUP: "{{aml_resource_group}}"
+      AML_WORKSPACE: "{{aml_workspace}}"
+      OSMO_WORKFLOW_ID: "{{workflow_id}}"
+      GIT_PYTHON_REFRESH: quiet  # mlflow probes for git; the image has none
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -euo pipefail
+      pip install --quiet --no-cache-dir mujoco==3.17.0 onnxruntime numpy \
+        azure-ai-ml==1.35.2 azure-identity==1.27.0 azure-storage-blob==12.27.1 \
+        mlflow-skinny==3.15.0 azureml-mlflow==1.62.0.post6
+      cd /opt/rl
+      python data_assets.py download --asset "{{dataset}}" --out /tmp/sim2sim-data
+      POLICY=$(find {{input:0}} -name policy.onnx | head -1)
+      python validate_mujoco.py --policy "$POLICY" --data-dir /tmp/sim2sim-data --out {{output}} \
+        --model-json {{input:1}}/model.json --experiment "{{experiment}}" --threshold {{threshold}}
+
+default-values:
+  aml_subscription_id: ""
+  aml_resource_group: ""
+  aml_workspace: ""
+  experiment: cartpole-rl
+  model_name: cartpole-policy
+  dataset: cartpole-sim2sim-scenarios
+  num_envs: 1024
+  max_iterations: 150
+  threshold: 0.9

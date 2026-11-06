@@ -285,6 +285,18 @@ variable "storage_container_name" {
   default     = "osmo"
 }
 
+variable "data_lake_container_name" {
+  description = "数据湖（ADLS Gen2）中存放机器人数据的容器（文件系统）"
+  type        = string
+  default     = "robotics-data"
+}
+
+variable "aml_public_network_access_enabled" {
+  description = "AzureML 工作区是否允许公网访问（仍需 Entra ID 认证和 RBAC）。开启后可从浏览器使用 Studio；关闭则只能从 VNet 内访问"
+  type        = bool
+  default     = true
+}
+
 ################################################################################
 # OSMO 工作负载身份
 ################################################################################

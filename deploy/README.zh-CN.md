@@ -17,6 +17,7 @@
 | Traefik（公网 HTTPS 入口，可选） | `traefik/traefik` 42.3.0（Traefik v3.7.17） | `traefik` | 用你提供的证书终止 TLS，转发到 `osmo-gateway`；使用 infra/terraform 管理的固定公网 IP |
 | Keycloak（浏览器登录，可选） | Keycloak Operator 26.8.2（官方清单） | `keycloak` | OIDC 身份提供方，地址 `https://<域名>/auth`，realm 为 `osmo`。组 `osmo-admins` / `osmo-users` 通过 token 中的 `roles` 声明映射为 OSMO 角色。数据库为现有 PostgreSQL 上的 `keycloak` 库（专用账号，TLS 连接） |
 | workflow-data SAS 轮换器 | [manifests/workflow-data-sas-rotator.yaml](manifests/workflow-data-sas-rotator.yaml) | `osmo` | 绕过 OSMO 6.3.1 bug 的 CronJob（原因见下文），升级到 OSMO 6.4 后删除 |
+| AzureML 闭环（可选） | [workflows/rl-train-validate.yaml](workflows/rl-train-validate.yaml)、[workflows/azureml-seed-data.yaml](workflows/azureml-seed-data.yaml) | `osmo-workflows` | 普通的 OSMO 工作流，用 Workload Identity 调用 AzureML（MLflow、模型注册表、数据资产），集群里不安装任何组件。见 [docs/azureml-loop.md](../docs/azureml-loop.md) |
 
 ## 第一阶段设计
 
@@ -67,6 +68,9 @@ OSMO_HOSTNAME=osmo.example.com TLS_CERT_FILE=/path/fullchain.pem TLS_KEY_FILE=/p
 # 可选：浏览器 / Web UI 登录，按用户区分角色（Keycloak），需先完成第 5 步
 OSMO_HOSTNAME=osmo.example.com KEYCLOAK_ADMINS="alice@example.com" KEYCLOAK_USERS="bob@example.com" \
   deploy/scripts/06-keycloak-login.sh    # 初始（临时）密码保存在 ~/.osmo-keycloak-initial-passwords
+
+# 可选：AzureML 闭环（需先 apply infra/terraform/azureml.tf）
+deploy/scripts/07-azureml-loop.sh       # 准备数据资产，然后 训练（T4）→ 注册 → MuJoCo sim2sim 验证
 
 # 集群被停止后恢复（例如每晚的自动停机）
 deploy/scripts/00-resume.sh
@@ -122,6 +126,7 @@ osmo workflow logs <workflow-id>
 
 | `mujoco`（可选） | [mujoco-sim.yaml](workflows/mujoco-sim.yaml) | 在 CPU 平台（`npcpu`）上运行 MuJoCo 3.17 headless 仿真：双摆加若干下落的盒子，仿真时长 10 秒。校验盒子最终静止在地面上，并上传 `trajectory.csv` 和 `summary.txt` | ✅（2026-11-06） |
 | `gazebo`（可选） | [gazebo-sim.yaml](workflows/gazebo-sim.yaml) | 在 `npcpu` 上以 headless server 模式运行 Gazebo Harmonic（gz-sim 8.11，镜像 `osrf/ros:jazzy-simulation`），执行 [files/falling_shapes.sdf](workflows/files/falling_shapes.sdf) 50,000 次迭代，耗时约 11 秒，并上传录制的 `state.tlog` | ✅（2026-11-06） |
+| `07-azureml-loop.sh`（可选） | [rl-train-validate.yaml](workflows/rl-train-validate.yaml) | 数据湖 → AzureML 数据资产；T4 上 Isaac Lab 训练并导出 ONNX；在 AzureML 中记录 MLflow 运行并注册模型；在 MuJoCo 中对 ONNX 策略做 sim2sim 验证（100 个场景），按成功率门禁给模型版本打标签 | ✅（2026-11-06）：100/100 回合通过 |
 
 只跑其中几项：`deploy/scripts/04-verify.sh hello storage`；只跑仿真示例：`deploy/scripts/04-verify.sh isaaclab mujoco gazebo`。
 
@@ -165,7 +170,7 @@ osmo workflow logs <workflow-id>
 
 - **产物只能在 VNet 内下载**：Blob 没有公网入口，所以在 VNet 外的工作站上，直接读写存储的 `osmo` 命令无法使用。
 - **SAS 轮换器每 3 天重启一次 OSMO 的 Pod**：OSMO 不会自动重新加载 Secret。如果 CronJob 连续失败超过约 7 天，产物上传就会失败。可以用 `kubectl get cronjob,jobs -n osmo` 检查运行情况。
-- **Spot 节点可能被回收**：节点被回收时，上面正在运行的工作流会中断。
+- **Spot 节点可能被回收**：节点被回收时，上面正在运行的工作流会中断（状态为 `FAILED_BACKEND_ERROR`，重新提交即可）。AzureML 闭环测试中遇到过一次。
 - **authz 使用 `sslmode=require`**：连接是加密的，但不校验 PostgreSQL 的服务端证书。
 
 ## OSMO 6.4 发布之后

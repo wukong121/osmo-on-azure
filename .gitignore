@@ -4,3 +4,5 @@
 *.pem
 *.pfx
 *.crt
+__pycache__/
+*.pyc

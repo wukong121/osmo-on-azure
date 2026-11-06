@@ -90,6 +90,11 @@ locals {
     vault    = "privatelink.vaultcore.azure.net"
     redis    = "privatelink.redis.azure.net"
     postgres = local.names.pgsql_dns_zone
+    # AzureML 与数据湖
+    file    = "privatelink.file.core.windows.net"
+    dfs     = "privatelink.dfs.core.windows.net"
+    aml_api = "privatelink.api.azureml.ms"
+    aml_nb  = "privatelink.notebooks.azure.net"
   }
 }
 

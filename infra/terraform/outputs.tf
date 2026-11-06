@@ -97,3 +97,31 @@ output "ingress_public_ip" {
 output "ingress_public_ip_name" {
   value = azurerm_public_ip.ingress.name
 }
+
+################################################################################
+# AzureML 与数据湖
+################################################################################
+
+output "aml_workspace_name" {
+  value = azurerm_machine_learning_workspace.main.name
+}
+
+output "aml_workspace_id" {
+  value = azurerm_machine_learning_workspace.main.id
+}
+
+output "aml_storage_account_name" {
+  value = azapi_resource.storage_aml.name
+}
+
+output "data_lake_account_name" {
+  value = azapi_resource.storage_data.name
+}
+
+output "data_lake_container_name" {
+  value = azapi_resource.data_lake_container.name
+}
+
+output "data_lake_datastore_name" {
+  value = azurerm_machine_learning_datastore_datalake_gen2.robotics_data.name
+}
