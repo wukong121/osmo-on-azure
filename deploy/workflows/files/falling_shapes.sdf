@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<!-- Minimal headless Gazebo world for OSMO smoke tests: ground plane + falling shapes.
+     real_time_factor=0 runs the simulation as fast as possible (no real-time pacing). -->
+<sdf version="1.9">
+  <world name="osmo_smoke">
+    <physics name="fast" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <gravity>0 0 -9.8</gravity>
+    <model name="ground">
+      <static>true</static>
+      <link name="link">
+        <collision name="c"><geometry><plane><normal>0 0 1</normal><size>20 20</size></plane></geometry></collision>
+      </link>
+    </model>
+    <model name="box">
+      <pose>0 0 2 0 0 0</pose>
+      <link name="link">
+        <inertial><mass>1</mass><inertia><ixx>0.167</ixx><iyy>0.167</iyy><izz>0.167</izz></inertia></inertial>
+        <collision name="c"><geometry><box><size>1 1 1</size></box></geometry></collision>
+      </link>
+    </model>
+    <model name="sphere">
+      <pose>2 0 3 0 0 0</pose>
+      <link name="link">
+        <inertial><mass>1</mass><inertia><ixx>0.1</ixx><iyy>0.1</iyy><izz>0.1</izz></inertia></inertial>
+        <collision name="c"><geometry><sphere><radius>0.5</radius></sphere></geometry></collision>
+      </link>
+    </model>
+    <model name="cylinder">
+      <pose>-2 0 4 0.3 0 0</pose>
+      <link name="link">
+        <inertial><mass>1</mass><inertia><ixx>0.146</ixx><iyy>0.146</iyy><izz>0.125</izz></inertia></inertial>
+        <collision name="c"><geometry><cylinder><radius>0.5</radius><length>1</length></cylinder></geometry></collision>
+      </link>
+    </model>
+  </world>
+</sdf>
