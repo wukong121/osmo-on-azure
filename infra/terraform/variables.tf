@@ -144,9 +144,9 @@ variable "system_node_vm_size" {
 }
 
 variable "system_node_min_count" {
-  description = "系统节点池最小节点数"
+  description = "系统节点池最小节点数。系统池同时承载 OSMO 控制面、Traefik、KAI 以及订阅策略注入的组件（如 Defender），OSMO 按节点当前空闲资源校验作业，1 台时 CPU 作业会被拒绝，建议 >= 2"
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "system_node_max_count" {

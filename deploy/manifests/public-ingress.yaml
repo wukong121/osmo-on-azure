@@ -1,0 +1,30 @@
+# Public HTTPS entry for OSMO through Traefik.
+# Rendered by deploy/scripts/05-public-endpoint.sh with envsubst: ${OSMO_HOSTNAME}
+# TLS Secret osmo/osmo-public-tls is created by the same script from your certificate files.
+#
+# Traffic: client --HTTPS--> Traefik (TLS terminated) --HTTP--> osmo-gateway (Envoy, authz)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: osmo-public
+  namespace: osmo
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - "${OSMO_HOSTNAME}"
+      secretName: osmo-public-tls
+  rules:
+    - host: "${OSMO_HOSTNAME}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: osmo-gateway
+                port:
+                  number: 80

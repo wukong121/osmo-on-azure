@@ -18,6 +18,8 @@ _Edges: green = private (VNet / Private Link) · orange dashed = public endpoint
 | Blob storage | Private only (private endpoint) | Shared Key is disabled. OSMO uses Workload Identity, plus a user delegation SAS for workflow data on OSMO 6.3.1. |
 | Key Vault | Private only (private endpoint) | Reserved for in-cluster secret management (Key Vault CSI). Terraform does not write secrets into it; see Notes. |
 | GPU node pool | — | NVIDIA T4, **Spot** priority by default (Regular is available), can scale to zero, but keep `gpu_node_min_count = 1` while testing because OSMO rejects submissions to an empty platform. `gpu_driver=None`: the GPU Operator installs the driver. |
+| System node pool | — | `Standard_D8s_v4`, minimum **2** nodes. It also runs Traefik, KAI and policy-injected components, and OSMO rejects CPU tasks when the pool has no free CPU. |
+| Public ingress (Traefik) | Static public IP `pip-<base>-ingress`, plus NSG `nsg-<base>-aks` on `snet-aks` | Only 80/443 to the ingress IP are allowed from the Internet. Traefik binds to this IP (see deploy/README.md, step 5). |
 
 Azure Container Registry is out of scope for phase 1. Images are pulled directly from nvcr.io.
 
@@ -106,6 +108,7 @@ kubectl get nodes
 | Output | Used for |
 |---|---|
 | `osmo_identity_client_id` | The `azure.workload.identity/client-id` annotation on OSMO service accounts |
+| `ingress_public_ip` / `ingress_public_ip_name` | Static IP for the public HTTPS entry. Point the DNS A record at it. |
 | `postgres_fqdn` / `postgres_db_name` / `postgres_admin_username` | OSMO database connection |
 | `redis_hostname` / `redis_port` | OSMO Redis connection (TLS) |
 | `storage_account_name` / `storage_container_name` / `storage_blob_endpoint` | Storage for OSMO workflow data, logs and artifacts |

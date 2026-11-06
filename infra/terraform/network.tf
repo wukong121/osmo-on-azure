@@ -108,3 +108,58 @@ resource "azurerm_private_dns_zone_virtual_network_link" "main" {
   registration_enabled = false
   tags                 = local.tags
 }
+
+################################################################################
+# 公网入口（Traefik）
+#
+# - 固定公网 IP：由 Terraform 管理，Traefik 的 LoadBalancer Service 通过注解使用它，
+#   重装 Traefik 不会改变 IP（DNS 记录保持有效）
+# - snet-aks 的 NSG：只对入口 IP 放行来自 Internet 的 80/443。
+#   部分订阅（如 MCAPS）的策略会给子网自动挂一个默认拒绝入站的 NSG，
+#   这里用自管的 NSG 替换它，在没有该策略的订阅中同样适用
+################################################################################
+
+resource "azurerm_public_ip" "ingress" {
+  name                = local.names.pip_ingress
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+  tags                = local.tags
+
+  lifecycle {
+    ignore_changes = [ip_tags]
+  }
+}
+
+# AKS 使用节点资源组之外的公网 IP 时，控制面身份需要该资源组的 Network Contributor
+resource "azurerm_role_assignment" "aks_ingress_pip" {
+  scope                = azurerm_resource_group.main.id
+  role_definition_name = "Network Contributor"
+  principal_id         = azurerm_user_assigned_identity.aks.principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+resource "azurerm_network_security_group" "aks" {
+  name                = local.names.nsg_aks
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  tags                = local.tags
+
+  security_rule {
+    name                       = "allow-internet-to-ingress-http-https"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_address_prefix      = "Internet"
+    source_port_range          = "*"
+    destination_address_prefix = azurerm_public_ip.ingress.ip_address
+    destination_port_ranges    = ["80", "443"]
+  }
+}
+
+resource "azurerm_subnet_network_security_group_association" "aks" {
+  subnet_id                 = azurerm_subnet.aks.id
+  network_security_group_id = azurerm_network_security_group.aks.id
+}

@@ -84,3 +84,12 @@ output "redis_primary_key" {
   value       = azurerm_managed_redis.main.default_database[0].primary_access_key
   sensitive   = true
 }
+
+output "ingress_public_ip" {
+  description = "Traefik 公网入口的固定 IP（DNS A 记录指向它）"
+  value       = azurerm_public_ip.ingress.ip_address
+}
+
+output "ingress_public_ip_name" {
+  value = azurerm_public_ip.ingress.name
+}

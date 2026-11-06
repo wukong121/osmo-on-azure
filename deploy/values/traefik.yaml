@@ -1,0 +1,46 @@
+# Traefik ingress controller for the public OSMO HTTPS endpoint.
+# Chart: traefik/traefik 42.3.0 (Traefik v3.7.17). Installed by scripts/05-public-endpoint.sh.
+deployment:
+  replicas: 1
+
+# IngressClass "traefik" (not the cluster default)
+ingressClass:
+  enabled: true
+  isDefaultClass: false
+  name: traefik
+
+providers:
+  kubernetesIngress:
+    enabled: true
+  kubernetesCRD:
+    enabled: true
+
+ports:
+  # Redirect HTTP to HTTPS
+  web:
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    http:
+      tls:
+        enabled: true
+
+service:
+  type: LoadBalancer
+  spec:
+    # Preserve client source IPs (for access logs / future allow-lists)
+    externalTrafficPolicy: Local
+
+accessLog:
+  enabled: true
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi

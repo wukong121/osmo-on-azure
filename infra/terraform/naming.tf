@@ -50,6 +50,8 @@ locals {
     snet_pgsql     = "snet-pgsql"
     pip_nat        = "pip-${local.base_name}-ng"
     nat_gateway    = "ng-${local.base_name}"
+    pip_ingress    = "pip-${local.base_name}-ingress"
+    nsg_aks        = "nsg-${local.base_name}-aks"
     dns_vnet_link  = "vnetlink-${local.base_name}"
     pgsql_dns_zone = "${local.base_name}.private.postgres.database.azure.com"
 
