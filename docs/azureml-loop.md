@@ -34,19 +34,9 @@
 
 ## 3. 流程
 
-```
-                 ┌──────────── OSMO 工作流 rl-train-validate ─────────────┐
-                 │                                                        │
- 数据湖 ──(数据资产)──┐                                                     │
-                 │   train (T4)          register (CPU)       validate (CPU)
-                 │   Isaac Lab 3.0  ──►  MLflow 运行      ──►  MuJoCo sim2sim
-                 │   PPO 训练 + ONNX     注册模型 vN           100 个初始状态
-                 │                       sim2sim=pending       成功率门禁
-                 └──────────────────────────┬──────────────────────┬──────┘
-                                            ▼                      ▼
-                              AzureML：实验 cartpole-rl、模型 cartpole-policy:N
-                                       标签 sim2sim_validation=passed|failed
-```
+![OSMO + AzureML 闭环时序图](images/azureml-loop.png)
+
+_UML 时序图：紫色区域是数据准备（每个数据版本一次），绿色区域是闭环工作流；`alt` 框是仿真验证门禁的两种结果。_
 
 1. **数据准备**（`deploy/workflows/azureml-seed-data.yaml`，每个数据版本跑一次）
    - 把验证集上传到数据湖 `robotics-data/cartpole/sim2sim/<版本>/`：MuJoCo 版 Cartpole 模型 `cartpole.xml`，以及 100 个初始状态 `scenarios.json`。初始状态按 Isaac-Cartpole 的重置分布采样，随机种子固定。
