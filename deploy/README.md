@@ -4,7 +4,7 @@ English | [简体中文](README.zh-CN.md)
 
 This directory deploys NVIDIA OSMO 6.3.1 onto the AKS cluster created by [infra/terraform](../infra/terraform/README.md). It uses the Azure data services from the same Terraform state.
 
-**Status (2026-11-05):** deployed in West US 3, and all phase-1 acceptance checks pass (`hello`, `storage`, `gpu`).
+**Status (2026-11-06):** deployed in West US 3. All phase-1 acceptance checks pass (`hello`, `storage`, `gpu`), and OSMO is reachable at a public HTTPS hostname through Traefik.
 
 ## Components and versions
 
@@ -14,6 +14,7 @@ This directory deploys NVIDIA OSMO 6.3.1 onto the AKS cluster created by [infra/
 | KAI Scheduler | `oci://ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler` v0.14.9 | `kai-scheduler` | The KAI line paired with OSMO 6.3.x. GPU runtimeClass injection is disabled. |
 | OSMO service | `osmo/service` 1.3.1 (OSMO 6.3.1), release `osmo` | `osmo` | API, router, worker, logger, agent, UI, Envoy gateway, authz |
 | OSMO backend operator | `osmo/backend-operator` 1.3.1, release `osmo-operator` | `osmo-operator` | Registers AKS as backend `default`. Workflow pods run in `osmo-workflows`. |
+| Traefik (public HTTPS entry, optional) | `traefik/traefik` 42.3.0 (Traefik v3.7.17) | `traefik` | Terminates TLS with your certificate and routes to `osmo-gateway`. Uses the static public IP from infra/terraform. |
 | Workflow-data SAS rotator | [manifests/workflow-data-sas-rotator.yaml](manifests/workflow-data-sas-rotator.yaml) | `osmo` | A CronJob that works around an OSMO 6.3.1 bug (see below). Remove it after upgrading to OSMO 6.4. |
 
 ## Phase-1 design
@@ -24,7 +25,9 @@ This directory deploys NVIDIA OSMO 6.3.1 onto the AKS cluster created by [infra/
   - The `admin` user logs in with an access token stored in the `osmo/osmo-default-admin` Secret.
   - The backend operator uses its own token with the `osmo-backend` role.
   - The web UI needs an identity provider for browser login, so phase 1 is CLI-first. Entra ID through oauth2-proxy comes next.
-- **Access.** The gateway is a ClusterIP service. Reach it with `kubectl port-forward`, which goes through the Entra ID–protected AKS API.
+- **Access.** Two options:
+  - `kubectl port-forward`, which goes through the Entra ID–protected AKS API. Always available.
+  - A public HTTPS hostname through Traefik (step 5). It uses your certificate and a static IP managed by Terraform, and is open to the internet. Access is protected by OSMO token authentication.
 - **Data services.**
   - PostgreSQL uses TLS (`sslmode=require` for authz).
   - Redis uses TLS on port 10000.
@@ -55,7 +58,16 @@ deploy/scripts/01-cluster-addons.sh   # GPU Operator + KAI Scheduler
 deploy/scripts/02-osmo-service.sh     # Secrets, MEK, SAS rotator, OSMO service chart
 deploy/scripts/03-osmo-backend.sh     # backend-operator token + chart; registers backend "default"
 deploy/scripts/04-verify.sh           # phase-1 acceptance workflows
+
+# Optional: public HTTPS hostname through Traefik
+OSMO_HOSTNAME=osmo.example.com TLS_CERT_FILE=/path/fullchain.pem TLS_KEY_FILE=/path/private.key \
+  deploy/scripts/05-public-endpoint.sh   # then point a DNS A record at: terraform output ingress_public_ip
+
+# After the cluster was stopped (e.g. nightly auto-shutdown)
+deploy/scripts/00-resume.sh
 ```
+
+Keep certificate and key files outside the repository. `.gitignore` blocks `*.pem`, `*.key`, `*.crt`, `*.pfx` and `*.zip` as a safety net.
 
 Every script can be re-run safely. Two values are created once and never overwritten:
 - The default admin token (`osmo/osmo-default-admin`)
@@ -64,6 +76,17 @@ Every script can be re-run safely. Two values are created once and never overwri
 Back up the MEK. Losing it makes the encrypted data in PostgreSQL unreadable.
 
 ## Use OSMO
+
+With the public hostname:
+
+```bash
+osmo login https://osmo.example.com --method token --token-file <file with the admin access token>
+osmo workflow list
+```
+
+Read the admin access token with `kubectl get secret osmo-default-admin -n osmo -o jsonpath='{.data.password}' | base64 -d`, and keep it secret.
+
+With port-forward:
 
 ```bash
 kubectl port-forward -n osmo svc/osmo-gateway 9000:80 &
@@ -102,10 +125,16 @@ Run a subset with `deploy/scripts/04-verify.sh hello storage`.
 | 4 | Task artifact upload fails with `KeyError: 'access_key_id'` | OSMO 6.3.1 bug: osmo-ctrl assumes the workflow_data credential has keys. Fixed in OSMO 6.4, which is not released yet. Account keys are blocked by policy. | User delegation SAS for `workflow_data`, rotated every 3 days by a CronJob ([manifests/workflow-data-sas-rotator.yaml](manifests/workflow-data-sas-rotator.yaml)) |
 | 5 | GPU containers fail with `No help topic for 'apply-cuda-memory-limits'` | Container toolkit v1.17.8 (pinned by microsoft/physical-ai-toolchain for operator v26.3) is too old for operator v26.7 | Use the chart's toolkit v1.20.1. GPU nodes run Ubuntu 22.04, where it is stable. |
 | 6 | GPU submit fails with `There are no resources in platform t4` | OSMO validates against existing nodes, so a pool at 0 nodes cannot receive work | Keep `gpu_node_min_count = 1` while testing, and set it to 0 when idle |
+| 7 | CPU submit fails with `Value 1.0 too high for CPU` | The system pool also runs Traefik, KAI, the GPU Operator controllers and policy-injected components such as Defender. OSMO validates against free capacity, not autoscaling. | `system_node_min_count` defaults to 2 |
+| 8 | After the nightly auto-shutdown, osmo-service, worker and agent are missing | Pods are created before the Workload Identity webhook is ready (`failed calling webhook mutation.azure-workload-identity.io`) | `scripts/00-resume.sh` starts AKS and PostgreSQL and restarts the OSMO deployments |
+| 9 | Envoy keeps serving the old config, with logs showing `unknown cluster 'oauth2-proxy'` | Envoy loads listeners and clusters from separate files, so a route can briefly reference a cluster that is not loaded yet, and the rejected update is not retried | `02-osmo-service.sh` restarts Envoy after every Helm upgrade |
+| 10 | The public IP does not respond on 80/443 | A subscription policy attached a deny-all-inbound NSG to every subnet | infra/terraform manages its own `snet-aks` NSG that allows 80/443 only to the ingress IP |
 
 ## Known limitations (phase 1)
 
-- **No browser UI login.** This needs an IdP. Add Entra ID through `gateway.oauth2Proxy` plus a JWT provider.
+- **No browser login yet.** The Entra ID overlay ([values/osmo-service-entra.yaml](values/osmo-service-entra.yaml)) has been tested up to the Entra sign-in page. In the test tenant the sign-in then stops at "admin approval required", because guest accounts cannot consent. Use an app registration in a tenant where you can grant admin consent. Enable the overlay by running `02-osmo-service.sh` with `ENTRA_CLIENT_ID` and `ENTRA_TENANT_ID` set, after creating the `osmo/oauth2-proxy-secrets` Secret.
+- **Nightly auto-shutdown.** Some subscriptions stop AKS and PostgreSQL every night. Run `scripts/00-resume.sh` before use.
+
 - **Artifacts can only be downloaded from inside the VNet.** Blob has no public endpoint, so `osmo` commands that move data directly between your workstation and storage do not work from outside the VNet.
 - **The SAS rotator restarts OSMO pods every 3 days.** OSMO does not reload Secrets on its own. If the CronJob fails for more than about 7 days, artifact uploads fail. Check it with `kubectl get cronjob,jobs -n osmo`.
 - **Spot capacity can be evicted.** A running workflow is lost when its node is evicted.

@@ -4,7 +4,7 @@
 
 这里的脚本把 NVIDIA OSMO 6.3.1 部署到 [infra/terraform](../infra/terraform/README.zh-CN.md) 创建的 AKS 集群上，并接入同一份 Terraform state 里的 Azure 数据服务。
 
-**状态（2026-11-05）**：已在 West US 3 部署完成，第一阶段的三项验收（`hello`、`storage`、`gpu`）全部通过。
+**状态（2026-11-06）**：已在 West US 3 部署完成。第一阶段的三项验收（`hello`、`storage`、`gpu`）全部通过，并已通过 Traefik 开放公网 HTTPS 域名访问。
 
 ## 组件与版本
 
@@ -14,6 +14,7 @@
 | KAI Scheduler | `oci://ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler` v0.14.9 | `kai-scheduler` | 与 OSMO 6.3.x 配套；关闭了 GPU runtimeClass 自动注入 |
 | OSMO service | `osmo/service` 1.3.1（OSMO 6.3.1），release `osmo` | `osmo` | API、Router、Worker、Logger、Agent、UI、Envoy 网关、authz |
 | OSMO backend operator | `osmo/backend-operator` 1.3.1，release `osmo-operator` | `osmo-operator` | 把 AKS 注册为 backend `default`；工作流 Pod 运行在 `osmo-workflows` |
+| Traefik（公网 HTTPS 入口，可选） | `traefik/traefik` 42.3.0（Traefik v3.7.17） | `traefik` | 用你提供的证书终止 TLS，转发到 `osmo-gateway`；使用 infra/terraform 管理的固定公网 IP |
 | workflow-data SAS 轮换器 | [manifests/workflow-data-sas-rotator.yaml](manifests/workflow-data-sas-rotator.yaml) | `osmo` | 绕过 OSMO 6.3.1 bug 的 CronJob（原因见下文），升级到 OSMO 6.4 后删除 |
 
 ## 第一阶段设计
@@ -24,7 +25,9 @@
   - `admin` 用户用 `osmo/osmo-default-admin` Secret 里的 access token 登录。
   - backend operator 使用单独的 token，角色为 `osmo-backend`。
   - Web UI 需要 IdP 才能在浏览器里登录，所以第一阶段以 CLI 为主，下一步通过 oauth2-proxy 接入 Entra ID。
-- **访问**：网关是 ClusterIP 服务，通过 `kubectl port-forward` 访问。这条路径走 AKS API，受 Entra ID 保护。
+- **访问**：有两种方式。
+  - `kubectl port-forward`：经过受 Entra ID 保护的 AKS API，任何时候都能用。
+  - 通过 Traefik 访问公网 HTTPS 域名（第 5 步）：使用你提供的证书和 Terraform 管理的固定 IP，入口对公网开放，安全上依靠 OSMO 的 token 认证。
 - **数据服务**：
   - PostgreSQL 走 TLS（authz 使用 `sslmode=require`）。
   - Redis 走 TLS，端口 10000。
@@ -55,7 +58,16 @@ deploy/scripts/01-cluster-addons.sh   # GPU Operator + KAI Scheduler
 deploy/scripts/02-osmo-service.sh     # Secret、MEK、SAS 轮换器、OSMO service chart
 deploy/scripts/03-osmo-backend.sh     # backend-operator token + chart，注册 backend "default"
 deploy/scripts/04-verify.sh           # 第一阶段验收工作流
+
+# 可选：通过 Traefik 开放公网 HTTPS 域名
+OSMO_HOSTNAME=osmo.example.com TLS_CERT_FILE=/path/fullchain.pem TLS_KEY_FILE=/path/private.key \
+  deploy/scripts/05-public-endpoint.sh   # 然后把 DNS A 记录指向：terraform output ingress_public_ip
+
+# 集群被停止后恢复（例如每晚的自动停机）
+deploy/scripts/00-resume.sh
 ```
+
+证书和私钥文件请放在仓库之外。`.gitignore` 已经屏蔽了 `*.pem`、`*.key`、`*.crt`、`*.pfx`、`*.zip`，作为兜底防护。
 
 每个脚本都可以安全地重复执行。有两样东西只在第一次运行时生成，之后不会被覆盖：
 - 默认管理员 token（`osmo/osmo-default-admin`）
@@ -64,6 +76,17 @@ deploy/scripts/04-verify.sh           # 第一阶段验收工作流
 请务必备份 MEK。MEK 一旦丢失，PostgreSQL 里加密的数据就无法再读取。
 
 ## 使用 OSMO
+
+通过公网域名：
+
+```bash
+osmo login https://osmo.example.com --method token --token-file <存放管理员 access token 的文件>
+osmo workflow list
+```
+
+管理员 access token 可以用 `kubectl get secret osmo-default-admin -n osmo -o jsonpath='{.data.password}' | base64 -d` 读取，请妥善保管。
+
+通过 port-forward：
 
 ```bash
 kubectl port-forward -n osmo svc/osmo-gateway 9000:80 &
@@ -102,10 +125,16 @@ osmo workflow logs <workflow-id>
 | 4 | 任务产物上传报 `KeyError: 'access_key_id'` | OSMO 6.3.1 的 bug：osmo-ctrl 默认 workflow_data 凭据里一定有密钥。6.4 已修复但尚未发布；账号密钥又被订阅策略禁用 | `workflow_data` 改用用户委托 SAS，由 CronJob 每 3 天轮换一次（[manifests/workflow-data-sas-rotator.yaml](manifests/workflow-data-sas-rotator.yaml)） |
 | 5 | GPU 容器启动失败，报 `No help topic for 'apply-cuda-memory-limits'` | container toolkit v1.17.8 是 microsoft/physical-ai-toolchain 为 operator v26.3 锁定的版本，对 operator v26.7 来说太旧 | 改用 chart 自带的 toolkit v1.20.1；GPU 节点运行 Ubuntu 22.04，在这个系统上运行稳定 |
 | 6 | 提交 GPU 任务报 `There are no resources in platform t4` | OSMO 按现有节点校验资源，节点池缩到 0 时无法接收任务 | 测试期间设置 `gpu_node_min_count = 1`，闲置时改回 0 |
+| 7 | 提交 CPU 任务报 `Value 1.0 too high for CPU` | 系统池上还运行着 Traefik、KAI、GPU Operator 控制器，以及订阅策略注入的 Defender 等组件；OSMO 按节点当前空闲资源校验，不会触发自动扩容 | `system_node_min_count` 默认改为 2 |
+| 8 | 每晚自动停机后，osmo-service、worker、agent 等组件缺失 | 集群启动时 Workload Identity 的 webhook 还没就绪，Pod 创建失败（`failed calling webhook mutation.azure-workload-identity.io`） | 运行 `scripts/00-resume.sh`：启动 AKS 和 PostgreSQL，并重启 OSMO 的各个 Deployment |
+| 9 | Envoy 一直沿用旧配置，日志报 `unknown cluster 'oauth2-proxy'` | Envoy 从两个文件分别加载监听器和集群配置，路由可能引用了一个还没加载的集群，被拒绝的更新不会自动重试 | `02-osmo-service.sh` 在每次 Helm 升级后重启 Envoy |
+| 10 | 公网 IP 的 80/443 端口不通 | 订阅策略给每个子网都自动挂上了默认拒绝所有入站流量的 NSG | infra/terraform 为 `snet-aks` 创建自管的 NSG，只允许访问入口 IP 的 80/443 |
 
 ## 已知限制（第一阶段）
 
-- **没有浏览器 UI 登录**：需要 IdP。下一步通过 `gateway.oauth2Proxy` 加 JWT provider 接入 Entra ID。
+- **暂无浏览器登录**：Entra ID 配置层（[values/osmo-service-entra.yaml](values/osmo-service-entra.yaml)）已经验证到 Entra 登录页，但在测试租户里会停在“需要管理员批准”，原因是来宾账号不能自行同意。请改用一个你能授予管理员同意的租户来注册应用。启用方法：先创建 Secret `osmo/oauth2-proxy-secrets`，再带上 `ENTRA_CLIENT_ID` 和 `ENTRA_TENANT_ID` 两个环境变量运行 `02-osmo-service.sh`。
+- **每晚自动停机**：部分订阅会在夜间自动停止 AKS 和 PostgreSQL，使用前请先运行 `scripts/00-resume.sh`。
+
 - **产物只能在 VNet 内下载**：Blob 没有公网入口，所以在 VNet 外的工作站上，直接读写存储的 `osmo` 命令无法使用。
 - **SAS 轮换器每 3 天重启一次 OSMO 的 Pod**：OSMO 不会自动重新加载 Secret。如果 CronJob 连续失败超过约 7 天，产物上传就会失败。可以用 `kubectl get cronjob,jobs -n osmo` 检查运行情况。
 - **Spot 节点可能被回收**：节点被回收时，上面正在运行的工作流会中断。

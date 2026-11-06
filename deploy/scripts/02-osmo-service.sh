@@ -49,12 +49,27 @@ if [[ -z "$(secret_value "$NS_OSMO" osmo-workflow-data-cred access_key)" ]]; the
 fi
 
 endpoint="azure://${STORAGE_ACCOUNT}/${STORAGE_CONTAINER}"
+
+# Optional Entra ID browser login (values/osmo-service-entra.yaml)
+extra_values=()
+if [[ -n "${ENTRA_CLIENT_ID:-}" ]]; then
+  [[ -n "${ENTRA_TENANT_ID:-}" ]] || fatal "ENTRA_TENANT_ID is required with ENTRA_CLIENT_ID"
+  [[ -n "$(secret_value "$NS_OSMO" oauth2-proxy-secrets client_secret)" ]] \
+    || fatal "Secret $NS_OSMO/oauth2-proxy-secrets (client_secret, cookie_secret) is missing"
+  rendered="$(mktemp)"; trap 'rm -f "$rendered"' EXIT
+  sed -e "s/ENTRA_TENANT_ID/${ENTRA_TENANT_ID}/g" -e "s/ENTRA_CLIENT_ID/${ENTRA_CLIENT_ID}/g" \
+    "$VALUES_DIR/osmo-service-entra.yaml" > "$rendered"
+  extra_values=(-f "$rendered")
+  info "Entra ID login enabled (client $ENTRA_CLIENT_ID)"
+fi
+
 info "Deploying OSMO service chart $OSMO_CHART_VERSION"
 helm repo add osmo https://helm.ngc.nvidia.com/nvidia/osmo --force-update >/dev/null
 helm upgrade --install osmo osmo/service \
   --version "$OSMO_CHART_VERSION" \
   --namespace "$NS_OSMO" \
   -f "$VALUES_DIR/osmo-service.yaml" \
+  "${extra_values[@]}" \
   --set-string "serviceAccount.annotations.azure\.workload\.identity/client-id=$OSMO_CLIENT_ID" \
   --set-string "services.postgres.serviceName=$PG_FQDN" \
   --set-string "services.postgres.user=$PG_USER" \
@@ -63,6 +78,12 @@ helm upgrade --install osmo osmo/service \
   --set-string "services.configs.workflow.workflow_log.credential.endpoint=${endpoint}/workflows/logs" \
   --set-string "services.configs.workflow.workflow_app.credential.endpoint=${endpoint}/apps" \
   --wait --timeout 15m
+
+# Envoy reloads listeners (LDS) and clusters (CDS) from separate files; when a change adds or
+# removes a cluster that a route references (e.g. toggling oauth2-proxy), the listener update can
+# be rejected with "unknown cluster" and is not retried. Restart Envoy to load both in one pass.
+kubectl rollout restart deploy/osmo-gateway-envoy -n "$NS_OSMO" >/dev/null
+kubectl rollout status deploy/osmo-gateway-envoy -n "$NS_OSMO" --timeout=5m >/dev/null
 
 kubectl get pods -n "$NS_OSMO"
 ok "OSMO service deployed. Access: kubectl port-forward -n $NS_OSMO svc/osmo-gateway ${OSMO_LOCAL_PORT}:80"

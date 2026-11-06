@@ -1,0 +1,6 @@
+# TLS material (certificates / private keys) must never be committed
+*.zip
+*.key
+*.pem
+*.pfx
+*.crt

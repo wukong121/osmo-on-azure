@@ -1,0 +1,52 @@
+# Optional overlay: browser/UI login with Microsoft Entra ID through oauth2-proxy.
+# Applied by scripts/02-osmo-service.sh when ENTRA_CLIENT_ID and ENTRA_TENANT_ID are set.
+#
+# Prerequisites (see deploy/README.md, "Entra ID login"):
+#   - An app registration with web redirect URI http://localhost:9000/oauth2/callback
+#     (Entra allows plain http only for localhost; add https://<domain>/oauth2/callback later)
+#   - Secret osmo/oauth2-proxy-secrets with keys client_secret and cookie_secret
+#
+# Rendered placeholders (--set by the script): ENTRA_TENANT_ID, ENTRA_CLIENT_ID.
+
+gateway:
+  envoy:
+    # Envoy fetches Entra signing keys (egress via the NAT gateway)
+    idp:
+      host: login.microsoftonline.com
+    jwt:
+      user_header: x-osmo-user
+      providers:
+        # Entra ID tokens forwarded by oauth2-proxy (browser sessions)
+        - issuer: https://login.microsoftonline.com/ENTRA_TENANT_ID/v2.0
+          audience: ENTRA_CLIENT_ID
+          jwks_uri: https://login.microsoftonline.com/ENTRA_TENANT_ID/discovery/v2.0/keys
+          user_claim: preferred_username
+          cluster: idp
+        # OSMO-issued JWTs (admin/backend tokens, workflow pods)
+        - issuer: osmo
+          audience: osmo
+          jwks_uri: https://osmo-service/api/auth/keys
+          user_claim: unique_name
+          cluster: osmo-service-jwks
+  oauth2Proxy:
+    enabled: true
+    scaling:
+      minReplicas: 1
+      maxReplicas: 1
+    provider: oidc
+    oidcIssuerUrl: https://login.microsoftonline.com/ENTRA_TENANT_ID/v2.0
+    clientId: ENTRA_CLIENT_ID
+    scope: "openid email profile offline_access"
+    useKubernetesSecrets: true
+    secretName: oauth2-proxy-secrets
+    clientSecretKey: client_secret
+    cookieSecretKey: cookie_secret
+    # Sessions in encrypted cookies (no Redis dependency)
+    redisSessionStore: false
+    # Phase 1 is reached via kubectl port-forward on http://localhost:9000.
+    # The chart hard-codes https://<hostname>/oauth2/callback; oauth2-proxy takes the last
+    # value of a repeated flag, so these override it. Remove when a real HTTPS domain is used.
+    cookieSecure: false
+    extraArgs:
+      - --redirect-url=http://localhost:9000/oauth2/callback
+      - --oidc-email-claim=preferred_username

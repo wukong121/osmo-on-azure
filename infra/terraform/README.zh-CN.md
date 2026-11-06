@@ -18,6 +18,8 @@ _连线说明：绿色 = 私网（VNet / Private Link）· 橙色虚线 = 仅放
 | Blob 存储 | 仅私网（PE） | 禁用 Shared Key。OSMO 通过 Workload Identity 访问；在 OSMO 6.3.1 上，workflow data 另外使用用户委托 SAS |
 | Key Vault | 仅私网（PE） | 预留给集群内密钥管理（Key Vault CSI）；Terraform 不向其写入 secret，见注意事项 |
 | GPU 节点池 | — | T4，默认 **Spot** 优先级（可改为 Regular），可以缩到 0 个节点，但测试期间请设置 `gpu_node_min_count = 1`，因为 OSMO 不接受提交到没有节点的平台；`gpu_driver=None`，驱动由 GPU Operator 安装 |
+| 系统节点池 | — | `Standard_D8s_v4`，最少 **2** 台。它同时运行 Traefik、KAI 和订阅策略注入的组件；池中没有空闲 CPU 时，OSMO 会拒绝 CPU 任务 |
+| 公网入口（Traefik） | 固定公网 IP `pip-<base>-ingress`，以及 `snet-aks` 上的 NSG `nsg-<base>-aks` | 只允许来自 Internet、访问入口 IP 80/443 端口的流量。Traefik 绑定到这个 IP（见 deploy/README.zh-CN.md 第 5 步） |
 
 ACR 不在第一阶段范围内，镜像直接从 nvcr.io 拉取。
 
@@ -105,6 +107,7 @@ kubectl get nodes
 | 输出 | 用途 |
 |---|---|
 | `osmo_identity_client_id` | OSMO ServiceAccount 的 `azure.workload.identity/client-id` 注解 |
+| `ingress_public_ip` / `ingress_public_ip_name` | 公网 HTTPS 入口的固定 IP，DNS A 记录指向它 |
 | `postgres_fqdn` / `postgres_db_name` / `postgres_admin_username` | OSMO 数据库连接 |
 | `redis_hostname` / `redis_port` | OSMO Redis 连接（TLS） |
 | `storage_account_name` / `storage_container_name` / `storage_blob_endpoint` | OSMO 工作流数据、日志、产物存储 |
