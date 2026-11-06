@@ -3,6 +3,14 @@
 > 评估时间：2026-11-05。以下结论来自公开文档和社区信息，**还没有在真实 T4 机器上实测**。
 > T4 的规格：Turing 架构（compute capability 7.5），16 GB 显存，有 RT Core。
 
+## 实测结果（2026-11-06）
+
+- **Isaac Lab 3.0 headless 训练在 T4 上运行通过。** 环境为 AKS 的 `Standard_NC8as_T4_v3` Spot 节点，驱动 595.91.07，镜像 `nvcr.io/nvidia/isaac-lab:3.0.0-kitless`。
+  - 运行时版本：PyTorch 2.11.0+cu130，Warp 1.17.0，物理后端 `newton_mjwarp`。
+  - 训练配置：`Isaac-Cartpole`，rsl_rl，64 个并行环境，10 次迭代，耗时约 75 秒（单次迭代约 0.17 秒）。
+  - 先在单个容器里验证，再作为 OSMO 作业运行；checkpoint 由 OSMO 上传到 Blob。见 `deploy/workflows/isaaclab-cartpole.yaml`。
+- Isaac Sim 渲染和相机类作业仍未测试，下面的结论汇总对它们依然适用。
+
 ## 结论汇总
 
 | 负载 | 结论 | 可信度 |

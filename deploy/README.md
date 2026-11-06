@@ -113,7 +113,16 @@ The gateway was also checked directly:
 - A request with forged `x-osmo-user` / `x-osmo-roles` headers also returns 401.
 - The admin access token can be exchanged for an OSMO JWT.
 
-Run a subset with `deploy/scripts/04-verify.sh hello storage`.
+| `isaaclab` (optional) | [isaaclab-cartpole.yaml](workflows/isaaclab-cartpole.yaml) | Isaac Lab 3.0 headless RL training (official `nvcr.io/nvidia/isaac-lab:3.0.0-kitless` image, Newton `newton_mjwarp` physics, rsl_rl, `Isaac-Cartpole`, 64 envs, 10 iterations) on T4. Checkpoints and TensorBoard logs are uploaded to Blob. | ✅ (2026-11-06) |
+
+Run a subset with `deploy/scripts/04-verify.sh hello storage`, or the simulation sample with `deploy/scripts/04-verify.sh isaaclab`.
+
+Isaac Lab 3.0 notes, verified in the container:
+- Training uses the unified `scripts/reinforcement_learning/train.py --rl_library rsl_rl`.
+- Task IDs have no `-v0` suffix (`Isaac-Cartpole`).
+- There is no `--headless` flag: training is headless unless `--visualizer` is given.
+- The kitless image runs as the non-root user `isaaclab`.
+- The first image pull (5.9 GB) takes about 2.5 minutes. A training run takes about 75 seconds.
 
 ## Issues found during deployment and their fixes
 
@@ -129,8 +138,11 @@ Run a subset with `deploy/scripts/04-verify.sh hello storage`.
 | 8 | After the nightly auto-shutdown, osmo-service, worker and agent are missing | Pods are created before the Workload Identity webhook is ready (`failed calling webhook mutation.azure-workload-identity.io`) | `scripts/00-resume.sh` starts AKS and PostgreSQL and restarts the OSMO deployments |
 | 9 | Envoy keeps serving the old config, with logs showing `unknown cluster 'oauth2-proxy'` | Envoy loads listeners and clusters from separate files, so a route can briefly reference a cluster that is not loaded yet, and the rejected update is not retried | `02-osmo-service.sh` restarts Envoy after every Helm upgrade |
 | 10 | The public IP does not respond on 80/443 | A subscription policy attached a deny-all-inbound NSG to every subnet | infra/terraform manages its own `snet-aks` NSG that allows 80/443 only to the ingress IP |
+| 11 | Submit fails with `Value ... too high` although the node is idle, or a new node pool is missing from `osmo resource list` | The backend listener's node cache is stale. For example, it still counts a pod that was deleted outside OSMO. | `kubectl rollout restart deploy -n osmo-operator` |
 
 ## Known limitations (phase 1)
+
+- **Azure Policy for Kubernetes runs in audit mode in this subscription.** It reports workflow pods that run as root, have no limits, use images outside ACR, and so on. If a customer environment enforces (denies) these rules, OSMO workflow pods and nvcr.io images will be rejected: mirror images to ACR and adjust the pod templates.
 
 - **No browser login yet.** The Entra ID overlay ([values/osmo-service-entra.yaml](values/osmo-service-entra.yaml)) has been tested up to the Entra sign-in page. In the test tenant the sign-in then stops at "admin approval required", because guest accounts cannot consent. Use an app registration in a tenant where you can grant admin consent. Enable the overlay by running `02-osmo-service.sh` with `ENTRA_CLIENT_ID` and `ENTRA_TENANT_ID` set, after creating the `osmo/oauth2-proxy-secrets` Secret.
 - **Nightly auto-shutdown.** Some subscriptions stop AKS and PostgreSQL every night. Run `scripts/00-resume.sh` before use.

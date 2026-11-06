@@ -108,6 +108,7 @@ osmo config show BACKEND default                     # backend 状态（online�
 osmo workflow submit deploy/workflows/hello.yaml --pool default              # CPU 任务
 osmo workflow submit deploy/workflows/storage-roundtrip.yaml --pool default  # 产物上传、下载
 osmo workflow submit deploy/workflows/gpu-t4.yaml --pool default             # T4 GPU 任务
+osmo workflow submit deploy/workflows/isaaclab-cartpole.yaml --pool default  # Isaac Lab 3.0 headless 训练（Cartpole）
 osmo workflow validate <工作流.yaml> --pool default                          # 只校验，不提交
 osmo workflow cancel <workflow-id>
 osmo workflow restart <workflow-id>                                          # 重跑失败的工作流
@@ -163,7 +164,7 @@ ContainerLogV2
 | 连接超时或 DNS 解析失败 | 集群已停机 | 执行 `deploy/scripts/00-resume.sh` |
 | `There are no resources in platform t4` | GPU 节点池当前是 0 台 | 设置 `gpu_node_min_count = 1`，然后 `terraform apply` |
 | `Value ... too high for CPU` | CPU 节点池 `npcpu` 的空闲 CPU 不够 | `osmo resource list -p default -m free` 查看空闲资源；调大 `cpu_node_min_count` 或换更大的 `cpu_node_vm_size`；或者减小工作流中 `cpu` 的申请量 |
-| 新增节点后，`osmo resource list` 里看不到新节点 | backend operator 用的还是旧的节点缓存 | `kubectl rollout restart deploy -n osmo-operator` |
+| 新增节点后 `osmo resource list` 里看不到；或者节点明明空闲，提交时却报 `too high` | backend operator 的节点缓存过期了（例如还在统计一个已经在 OSMO 之外被删掉的 Pod） | `kubectl rollout restart deploy -n osmo-operator` |
 | 工作流长时间停在 `PENDING` | 节点正在扩容、在拉镜像，或 Spot 容量不足 | 用 `osmo workflow events <id>` 和 `kubectl get events -n osmo-workflows` 排查 |
 | `FAILED_EVICTED` | Spot 节点被回收 | 执行 `osmo workflow restart <id>` 重跑 |
 | 产物上传失败（Blob 403 或 SAS 过期） | SAS 轮换器失败超过 7 天 | `kubectl get cronjob,jobs -n osmo`；手动触发一次：`kubectl create job --from=cronjob/osmo-sas-rotator sas-manual -n osmo` |

@@ -155,6 +155,17 @@ services:
               operator: Equal
               value: spot
               effect: NoSchedule
+          # Larger /dev/shm for PyTorch / Isaac Lab (Kubernetes default is 64 MiB)
+          volumes:
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: 8Gi
+          containers:
+            - name: "{{USER_CONTAINER_NAME}}"
+              volumeMounts:
+                - name: dshm
+                  mountPath: /dev/shm
 
     resourceValidations:
       gpu_required:

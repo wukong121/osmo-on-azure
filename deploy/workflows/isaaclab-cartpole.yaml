@@ -1,0 +1,40 @@
+# Isaac Lab 3.0 headless RL training on the T4 platform (phase-1 simulation sample).
+#
+# - Image: official nvcr.io/nvidia/isaac-lab:3.0.0-kitless (Newton physics, no Isaac Sim / RTX
+#   rendering, no camera). ~5.9 GB; the first pull on a new node takes ~2-3 minutes.
+# - Isaac Lab 3.0 trains headless unless --visualizer is given (there is no --headless flag),
+#   uses the unified scripts/reinforcement_learning/train.py, and task IDs have no -v0 suffix.
+# - Checkpoints and TensorBoard logs are copied to {{output}}; OSMO uploads them to Blob.
+# - Validated single-container on the AKS T4 node first: 10 iterations in ~75 s, physics
+#   backend newton_mjwarp on cuda:0.
+workflow:
+  name: isaaclab-cartpole
+  timeout:
+    exec_timeout: 30m
+    queue_timeout: 30m
+  resources:
+    one_t4:
+      platform: t4
+      gpu: 1
+      cpu: 4
+      memory: 24Gi
+      storage: 30Gi
+  tasks:
+  - name: train
+    image: nvcr.io/nvidia/isaac-lab:3.0.0-kitless
+    resource: one_t4
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -euo pipefail
+      nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
+      cd /workspace/isaaclab
+      python scripts/reinforcement_learning/train.py \
+        --rl_library rsl_rl \
+        --task Isaac-Cartpole \
+        --num_envs 64 \
+        --max_iterations 10
+      mkdir -p {{output}}
+      cp -r logs/rsl_rl {{output}}/
+      echo "Artifacts:"
+      find {{output}} -type f | sort

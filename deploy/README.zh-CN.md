@@ -113,7 +113,16 @@ osmo workflow logs <workflow-id>
 - 伪造 `x-osmo-user` / `x-osmo-roles` 身份头的请求同样返回 401。
 - 管理员 access token 能换到 OSMO JWT。
 
-只跑其中几项：`deploy/scripts/04-verify.sh hello storage`。
+| `isaaclab`（可选） | [isaaclab-cartpole.yaml](workflows/isaaclab-cartpole.yaml) | 在 T4 上运行 Isaac Lab 3.0 headless 强化学习训练：官方镜像 `nvcr.io/nvidia/isaac-lab:3.0.0-kitless`，Newton 物理后端（`newton_mjwarp`），rsl_rl 算法，任务 `Isaac-Cartpole`，64 个并行环境，10 次迭代。checkpoint 和 TensorBoard 日志会上传到 Blob | ✅（2026-11-06） |
+
+只跑其中几项：`deploy/scripts/04-verify.sh hello storage`；只跑仿真示例：`deploy/scripts/04-verify.sh isaaclab`。
+
+以下 Isaac Lab 3.0 的要点已在容器内实际验证：
+- 训练入口统一为 `scripts/reinforcement_learning/train.py --rl_library rsl_rl`。
+- 任务 ID 不再带 `-v0` 后缀（例如 `Isaac-Cartpole`）。
+- 没有 `--headless` 参数：只要不指定 `--visualizer`，训练就以 headless 方式运行。
+- kitless 镜像以非 root 用户 `isaaclab` 运行。
+- 首次拉取镜像（5.9 GB）约 2.5 分钟，单次训练约 75 秒。
 
 ## 部署中发现的问题与修复
 
@@ -129,8 +138,11 @@ osmo workflow logs <workflow-id>
 | 8 | 每晚自动停机后，osmo-service、worker、agent 等组件缺失 | 集群启动时 Workload Identity 的 webhook 还没就绪，Pod 创建失败（`failed calling webhook mutation.azure-workload-identity.io`） | 运行 `scripts/00-resume.sh`：启动 AKS 和 PostgreSQL，并重启 OSMO 的各个 Deployment |
 | 9 | Envoy 一直沿用旧配置，日志报 `unknown cluster 'oauth2-proxy'` | Envoy 从两个文件分别加载监听器和集群配置，路由可能引用了一个还没加载的集群，被拒绝的更新不会自动重试 | `02-osmo-service.sh` 在每次 Helm 升级后重启 Envoy |
 | 10 | 公网 IP 的 80/443 端口不通 | 订阅策略给每个子网都自动挂上了默认拒绝所有入站流量的 NSG | infra/terraform 为 `snet-aks` 创建自管的 NSG，只允许访问入口 IP 的 80/443 |
+| 11 | 节点明明空闲，提交时却报 `Value ... too high`；或者新加的节点池没有出现在 `osmo resource list` 里 | backend listener 的节点缓存过期了，例如还在统计一个已经在 OSMO 之外被删掉的 Pod | `kubectl rollout restart deploy -n osmo-operator` |
 
 ## 已知限制（第一阶段）
+
+- **本订阅的 Azure Policy for Kubernetes 处于 audit（审计）模式**：它会对工作流 Pod 以 root 运行、未设置 limits、镜像不在 ACR 中等情况发出告警，但不会拦截。如果客户环境把这些规则设为强制（deny），OSMO 的工作流 Pod 和 nvcr.io 镜像都会被拒绝，届时需要把镜像同步到 ACR，并相应调整 pod 模板。
 
 - **暂无浏览器登录**：Entra ID 配置层（[values/osmo-service-entra.yaml](values/osmo-service-entra.yaml)）已经验证到 Entra 登录页，但在测试租户里会停在“需要管理员批准”，原因是来宾账号不能自行同意。请改用一个你能授予管理员同意的租户来注册应用。启用方法：先创建 Secret `osmo/oauth2-proxy-secrets`，再带上 `ENTRA_CLIENT_ID` 和 `ENTRA_TENANT_ID` 两个环境变量运行 `02-osmo-service.sh`。
 - **每晚自动停机**：部分订阅会在夜间自动停止 AKS 和 PostgreSQL，使用前请先运行 `scripts/00-resume.sh`。
