@@ -70,7 +70,7 @@ OSMO_HOSTNAME=osmo.example.com KEYCLOAK_ADMINS="alice@example.com" KEYCLOAK_USER
   deploy/scripts/06-keycloak-login.sh    # initial (temporary) passwords: ~/.osmo-keycloak-initial-passwords
 
 # Optional: AzureML closed loop (needs infra/terraform/azureml.tf applied)
-deploy/scripts/07-azureml-loop.sh       # seed data asset, then train (T4) -> register -> MuJoCo sim2sim validation
+deploy/scripts/07-azureml-loop.sh       # seed data asset, then train (T4) -> register -> sim2sim validation (MuJoCo + Gazebo) -> gate
 
 # After the cluster was stopped (e.g. nightly auto-shutdown)
 deploy/scripts/00-resume.sh
@@ -126,7 +126,7 @@ The gateway was also checked directly:
 
 | `mujoco` (optional) | [mujoco-sim.yaml](workflows/mujoco-sim.yaml) | MuJoCo 3.17 headless simulation on the CPU platform (`npcpu`): double pendulum plus falling boxes, 10 s simulated. Checks that the boxes come to rest and uploads `trajectory.csv` and `summary.txt`. | ✅ (2026-11-06) |
 | `gazebo` (optional) | [gazebo-sim.yaml](workflows/gazebo-sim.yaml) | Gazebo Harmonic (gz-sim 8.11, `osrf/ros:jazzy-simulation`) headless server on `npcpu`: 50,000 iterations of [files/falling_shapes.sdf](workflows/files/falling_shapes.sdf) in about 11 s. Uploads the recorded `state.tlog`. | ✅ (2026-11-06) |
-| `07-azureml-loop.sh` (optional) | [rl-train-validate.yaml](workflows/rl-train-validate.yaml) | Data lake → AzureML data asset; Isaac Lab training on T4 with ONNX export; MLflow run and model registration in AzureML; MuJoCo sim2sim validation of the ONNX policy (100 scenarios) with a success-rate gate that tags the model version | ✅ (2026-11-06): 100/100 episodes passed |
+| `07-azureml-loop.sh` (optional) | [rl-train-validate.yaml](workflows/rl-train-validate.yaml) | Data lake → AzureML data asset; Isaac Lab training on T4 with ONNX export; MLflow run and model registration in AzureML; sim2sim validation of the ONNX policy in MuJoCo and Gazebo Harmonic in parallel (100 scenarios each); a gate task logs both runs and tags the model version passed/failed | ✅ (2026-11-09): 100/100 episodes in both simulators; an under-trained policy (5 iterations) is rejected by the gate |
 
 Run a subset with `deploy/scripts/04-verify.sh hello storage`, or the simulation samples with `deploy/scripts/04-verify.sh isaaclab mujoco gazebo`.
 

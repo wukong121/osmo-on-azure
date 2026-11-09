@@ -1,7 +1,7 @@
 # Seed the robotics data lake and register the dataset in AzureML (run once per dataset version).
 #
 # Simulates customer data arriving in the data lake: uploads the sim2sim validation set
-# (MuJoCo Cartpole model + 100 initial-state scenarios drawn from the Isaac-Cartpole reset
+# (Cartpole models for MuJoCo and Gazebo + 100 initial-state scenarios drawn from the Isaac-Cartpole reset
 # distribution) to ADLS Gen2 through its private endpoint with Workload Identity, then registers
 # it as the AzureML data asset cartpole-sim2sim-scenarios:<version>.
 #
@@ -29,6 +29,8 @@ workflow:
       path: /opt/rl/data_assets.py
     - localpath: files/rl/cartpole.xml
       path: /opt/rl/cartpole.xml
+    - localpath: files/rl/cartpole.sdf
+      path: /opt/rl/cartpole.sdf
     environment:
       AML_SUBSCRIPTION_ID: "{{aml_subscription_id}}"
       AML_RESOURCE_GROUP: "{{aml_resource_group}}"
@@ -41,7 +43,7 @@ workflow:
       set -euo pipefail
       pip install --quiet --no-cache-dir azure-ai-ml==1.35.2 azure-identity==1.27.0 azure-storage-blob==12.27.1 numpy
       cd /opt/rl
-      python data_assets.py seed --model-xml cartpole.xml --version "{{dataset_version}}"
+      python data_assets.py seed --file cartpole.xml --file cartpole.sdf --version "{{dataset_version}}"
 
 default-values:
   aml_subscription_id: ""

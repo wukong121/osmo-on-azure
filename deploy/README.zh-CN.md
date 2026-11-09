@@ -70,7 +70,7 @@ OSMO_HOSTNAME=osmo.example.com KEYCLOAK_ADMINS="alice@example.com" KEYCLOAK_USER
   deploy/scripts/06-keycloak-login.sh    # 初始（临时）密码保存在 ~/.osmo-keycloak-initial-passwords
 
 # 可选：AzureML 闭环（需先 apply infra/terraform/azureml.tf）
-deploy/scripts/07-azureml-loop.sh       # 准备数据资产，然后 训练（T4）→ 注册 → MuJoCo sim2sim 验证
+deploy/scripts/07-azureml-loop.sh       # 准备数据资产，然后 训练（T4）→ 注册 → sim2sim 验证（MuJoCo + Gazebo）→ 门禁
 
 # 集群被停止后恢复（例如每晚的自动停机）
 deploy/scripts/00-resume.sh
@@ -126,7 +126,7 @@ osmo workflow logs <workflow-id>
 
 | `mujoco`（可选） | [mujoco-sim.yaml](workflows/mujoco-sim.yaml) | 在 CPU 平台（`npcpu`）上运行 MuJoCo 3.17 headless 仿真：双摆加若干下落的盒子，仿真时长 10 秒。校验盒子最终静止在地面上，并上传 `trajectory.csv` 和 `summary.txt` | ✅（2026-11-06） |
 | `gazebo`（可选） | [gazebo-sim.yaml](workflows/gazebo-sim.yaml) | 在 `npcpu` 上以 headless server 模式运行 Gazebo Harmonic（gz-sim 8.11，镜像 `osrf/ros:jazzy-simulation`），执行 [files/falling_shapes.sdf](workflows/files/falling_shapes.sdf) 50,000 次迭代，耗时约 11 秒，并上传录制的 `state.tlog` | ✅（2026-11-06） |
-| `07-azureml-loop.sh`（可选） | [rl-train-validate.yaml](workflows/rl-train-validate.yaml) | 数据湖 → AzureML 数据资产；T4 上 Isaac Lab 训练并导出 ONNX；在 AzureML 中记录 MLflow 运行并注册模型；在 MuJoCo 中对 ONNX 策略做 sim2sim 验证（100 个场景），按成功率门禁给模型版本打标签 | ✅（2026-11-06）：100/100 回合通过 |
+| `07-azureml-loop.sh`（可选） | [rl-train-validate.yaml](workflows/rl-train-validate.yaml) | 数据湖 → AzureML 数据资产；T4 上 Isaac Lab 训练并导出 ONNX；在 AzureML 中记录 MLflow 运行并注册模型；在 MuJoCo 和 Gazebo Harmonic 中并行对 ONNX 策略做 sim2sim 验证（各 100 个场景），由门禁任务记录两边结果并给模型版本打 passed / failed 标签 | ✅（2026-11-09）：两个仿真器均 100/100 回合通过；欠训练（5 次迭代）的策略被门禁拦下 |
 
 只跑其中几项：`deploy/scripts/04-verify.sh hello storage`；只跑仿真示例：`deploy/scripts/04-verify.sh isaaclab mujoco gazebo`。
 

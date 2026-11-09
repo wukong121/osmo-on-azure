@@ -1,6 +1,6 @@
 """Robotics data lake <-> AzureML data assets.
 
-  seed     Upload the validation dataset (MuJoCo model + initial-state scenarios) to the data lake
+  seed     Upload the validation dataset (robot models for each simulator + initial-state scenarios) to the data lake
            (ADLS Gen2, private endpoint) and register it as an AzureML data asset.
   download Resolve a data asset (name[:version], default: latest) to its data lake folder and
            download it.
@@ -51,13 +51,13 @@ def make_scenarios(count: int, seed: int) -> list[dict]:
 def seed(args: argparse.Namespace) -> None:
     client = ml_client()
     prefix = f"{args.prefix.strip('/')}/{args.version}"
-    files = {
-        "cartpole.xml": Path(args.model_xml).read_bytes(),
+    files = {Path(f).name: Path(f).read_bytes() for f in args.file}
+    files.update({
         "scenarios.json": json.dumps(
             {"seed": args.seed, "episode_seconds": 5.0, "scenarios": make_scenarios(args.count, args.seed)},
             indent=2,
         ).encode(),
-    }
+    })
     cc = container_client(client, args.datastore)
     for name, payload in files.items():
         cc.upload_blob(f"{prefix}/{name}", payload, overwrite=True)
@@ -68,7 +68,7 @@ def seed(args: argparse.Namespace) -> None:
         version=args.version,
         type=AssetTypes.URI_FOLDER,
         path=f"azureml://datastores/{args.datastore}/paths/{prefix}/",
-        description="Cartpole sim2sim validation set: MuJoCo model + initial-state scenarios",
+        description="Cartpole sim2sim validation set: " + ", ".join(sorted(files)) + " (initial-state scenarios + robot models)",
         tags={"robot": "cartpole", "scenarios": str(args.count), "source": "simulated-customer-data"},
     )
     asset = client.data.create_or_update(asset)
@@ -98,7 +98,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("seed")
-    p.add_argument("--model-xml", required=True)
+    p.add_argument("--file", action="append", required=True, help="robot model file to include (repeatable)")
     p.add_argument("--datastore", default=os.environ.get("AML_DATASTORE", "robotics_data"))
     p.add_argument("--prefix", default="cartpole/sim2sim")
     p.add_argument("--name", default="cartpole-sim2sim-scenarios")

@@ -1,18 +1,24 @@
-# Closed loop on OSMO + AzureML: train (Isaac Lab, T4) -> register (AzureML) -> sim2sim validate (MuJoCo).
+# Closed loop on OSMO + AzureML: train (Isaac Lab, T4) -> register (AzureML) -> sim2sim
+# validation in two simulators (MuJoCo, Gazebo) -> gate.
 #
-#   train     Isaac Lab 3.0 headless PPO (RSL-RL) on Isaac-Cartpole, then export the policy to
-#             ONNX with Isaac Lab's play script (stopped as soon as the export is written).
-#   register  Replay the TensorBoard metrics into an MLflow run in the AzureML workspace, upload
-#             the ONNX policy + checkpoint + configs, and register model <model_name> with
-#             tag sim2sim_validation=pending.
-#   validate  Resolve the AzureML data asset <dataset> (MuJoCo model + scenarios in the data lake),
-#             run the ONNX policy in MuJoCo for every scenario, log an MLflow run, and tag the
-#             model version sim2sim_validation=passed|failed. Fails the task below <threshold>.
+#   fetch-data       Resolve the AzureML data asset <dataset> (robot models + scenarios in the data
+#                    lake) and download it. Runs in parallel with training.
+#   train            Isaac Lab 3.0 headless PPO (RSL-RL) on Isaac-Cartpole, then export the policy
+#                    to ONNX with Isaac Lab's play script (stopped once the export is written).
+#   register         Replay the TensorBoard metrics into an MLflow run in the AzureML workspace,
+#                    upload the ONNX policy + checkpoint + configs, and register model
+#                    <model_name> with tag sim2sim_validation=pending.
+#   validate-mujoco  Run the ONNX policy in MuJoCo for every scenario (pure simulation).
+#   validate-gazebo  Same in Gazebo Harmonic (gz-sim 8, DART), driven through gz.sim8 Python.
+#   gate             Log one MLflow child run per simulator, tag the model version
+#                    sim2sim_validation=passed|failed (+ per-simulator success rates), and fail
+#                    the workflow when any simulator is below <threshold>.
 #
 # OSMO stays the executor (scheduling, GPU, artifacts in Blob); AzureML is the system of record
 # (experiments, model registry, data assets). All Azure access uses the pod's Workload Identity.
 # Run deploy/workflows/azureml-seed-data.yaml once first. Submit with
 # deploy/scripts/07-azureml-loop.sh, which fills in the workspace coordinates from Terraform.
+# Gate failure demo: LOOP_SET="max_iterations=5" deploy/scripts/07-azureml-loop.sh loop
 workflow:
   name: rl-train-validate
   timeout:
@@ -30,6 +36,28 @@ workflow:
       memory: 4Gi
       storage: 5Gi
   tasks:
+  - name: fetch-data
+    image: python:3.12-slim
+    resource: cpu2
+    files:
+    - localpath: files/rl/aml_common.py
+      path: /opt/rl/aml_common.py
+    - localpath: files/rl/data_assets.py
+      path: /opt/rl/data_assets.py
+    environment:
+      AML_SUBSCRIPTION_ID: "{{aml_subscription_id}}"
+      AML_RESOURCE_GROUP: "{{aml_resource_group}}"
+      AML_WORKSPACE: "{{aml_workspace}}"
+      OSMO_WORKFLOW_ID: "{{workflow_id}}"
+      GIT_PYTHON_REFRESH: quiet  # mlflow probes for git; the image has none
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -euo pipefail
+      pip install --quiet --no-cache-dir azure-ai-ml==1.35.2 azure-identity==1.27.0 azure-storage-blob==12.27.1 numpy
+      cd /opt/rl
+      python data_assets.py download --asset "{{dataset}}" --out {{output}}
+
   - name: train
     image: nvcr.io/nvidia/isaac-lab:3.0.0-kitless
     resource: one_t4
@@ -85,19 +113,71 @@ workflow:
         --model-name "{{model_name}}" --experiment "{{experiment}}"
       cat {{output}}/model.json
 
-  - name: validate
+  - name: validate-mujoco
     image: python:3.12-slim
     resource: cpu2
     inputs:
     - task: train
+    - task: fetch-data
+    files:
+    - localpath: files/rl/sim2sim_common.py
+      path: /opt/rl/sim2sim_common.py
+    - localpath: files/rl/validate_mujoco.py
+      path: /opt/rl/validate_mujoco.py
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -euo pipefail
+      pip install --quiet --no-cache-dir mujoco==3.17.0 onnxruntime numpy
+      POLICY=$(find {{input:0}} -name policy.onnx | head -1)
+      cd /opt/rl
+      python validate_mujoco.py --policy "$POLICY" --data-dir {{input:1}} --out {{output}}
+
+  - name: validate-gazebo
+    image: ubuntu:24.04
+    resource: cpu2
+    inputs:
+    - task: train
+    - task: fetch-data
+    files:
+    - localpath: files/rl/sim2sim_common.py
+      path: /opt/rl/sim2sim_common.py
+    - localpath: files/rl/validate_gazebo.py
+      path: /opt/rl/validate_gazebo.py
+    environment:
+      DEBIAN_FRONTEND: noninteractive
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -euo pipefail
+      # Gazebo Harmonic from the OSRF apt repository: gz-sim 8 Python bindings, the system plugins
+      # and the DART physics engine (the -dev package provides the unversioned plugin name).
+      apt-get update -qq
+      apt-get install -y -qq --no-install-recommends ca-certificates curl gnupg >/dev/null
+      curl -fsSL https://packages.osrfoundation.org/gazebo.gpg -o /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg
+      echo "deb [arch=amd64 signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable noble main" \
+        > /etc/apt/sources.list.d/gazebo-stable.list
+      apt-get update -qq
+      apt-get install -y -qq --no-install-recommends python3-gz-sim8 libgz-sim8-plugins \
+        libgz-physics7-dartsim-dev python3-numpy python3-pip >/dev/null
+      pip install --quiet --no-cache-dir --break-system-packages onnxruntime
+      POLICY=$(find {{input:0}} -name policy.onnx | head -1)
+      cd /opt/rl
+      python3 validate_gazebo.py --policy "$POLICY" --data-dir {{input:1}} --out {{output}}
+
+  - name: gate
+    image: python:3.12-slim
+    resource: cpu2
+    inputs:
     - task: register
+    - task: fetch-data
+    - task: validate-mujoco
+    - task: validate-gazebo
     files:
     - localpath: files/rl/aml_common.py
       path: /opt/rl/aml_common.py
-    - localpath: files/rl/data_assets.py
-      path: /opt/rl/data_assets.py
-    - localpath: files/rl/validate_mujoco.py
-      path: /opt/rl/validate_mujoco.py
+    - localpath: files/rl/gate.py
+      path: /opt/rl/gate.py
     environment:
       AML_SUBSCRIPTION_ID: "{{aml_subscription_id}}"
       AML_RESOURCE_GROUP: "{{aml_resource_group}}"
@@ -108,14 +188,12 @@ workflow:
     args:
     - |
       set -euo pipefail
-      pip install --quiet --no-cache-dir mujoco==3.17.0 onnxruntime numpy \
-        azure-ai-ml==1.35.2 azure-identity==1.27.0 azure-storage-blob==12.27.1 \
+      pip install --quiet --no-cache-dir azure-ai-ml==1.35.2 azure-identity==1.27.0 \
         mlflow-skinny==3.15.0 azureml-mlflow==1.62.0.post6
       cd /opt/rl
-      python data_assets.py download --asset "{{dataset}}" --out /tmp/sim2sim-data
-      POLICY=$(find {{input:0}} -name policy.onnx | head -1)
-      python validate_mujoco.py --policy "$POLICY" --data-dir /tmp/sim2sim-data --out {{output}} \
-        --model-json {{input:1}}/model.json --experiment "{{experiment}}" --threshold {{threshold}}
+      python gate.py --model-json {{input:0}}/model.json --data-asset-json {{input:1}}/data_asset.json \
+        --report mujoco={{input:2}} --report gazebo={{input:3}} \
+        --threshold {{threshold}} --experiment "{{experiment}}" --out {{output}}
 
 default-values:
   aml_subscription_id: ""

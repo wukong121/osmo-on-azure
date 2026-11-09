@@ -17,7 +17,7 @@ _连线说明：绿色 = 私网（VNet / Private Link）· 橙色虚线 = 公网
 | [docs/background.md](docs/background.md) | 项目背景、技术选型、PoC 成功标准、待确认事项 |
 | [docs/reference-repos.md](docs/reference-repos.md) | 参考仓库研读结论（NVIDIA/OSMO、microsoft/physical-ai-toolchain）：版本选择、PG TLS、可复用内容 |
 | [docs/operations-guide.md](docs/operations-guide.md) | 操作手册：恢复环境、登录、查看调度记录和日志、资源查看、成本控制、常见问题 |
-| [docs/azureml-loop.md](docs/azureml-loop.md) | OSMO + AzureML 闭环：数据湖 → T4 上 Isaac Lab 训练 → MLflow 实验跟踪和模型注册 → MuJoCo sim2sim 验证 |
+| [docs/azureml-loop.md](docs/azureml-loop.md) | OSMO + AzureML 闭环：数据湖 → T4 上 Isaac Lab 训练 → MLflow 实验跟踪和模型注册 → MuJoCo 和 Gazebo 中的 sim2sim 验证 |
 | [docs/t4-feasibility.md](docs/t4-feasibility.md) | T4 GPU 运行 Isaac Lab / Isaac Sim / MuJoCo / Gazebo 的可行性评估 |
 | [docs/images/](docs/images/) | Azure 部署架构图、OSMO + AzureML 闭环时序图、OSMO 部署架构图、工作流时序图 |
 | [infra/terraform/](infra/terraform/README.zh-CN.md) | Azure 基础设施：AKS（系统池、CPU 池、T4 Spot GPU 池）、私网数据组件、固定入口 IP、AzureML 工作区和机器人数据湖 |
@@ -46,6 +46,6 @@ _连线说明：绿色 = 私网（VNet / Private Link）· 橙色虚线 = 公网
     - Gazebo Harmonic（CPU 池）
 - **AzureML 闭环**（[docs/azureml-loop.md](docs/azureml-loop.md)）：
   - OSMO 负责执行，AzureML 负责记录实验（MLflow）、模型和数据资产。
-  - 一个 OSMO 工作流完成：T4 上用 Isaac Lab 训练策略 → 在 AzureML 注册模型 → 在 MuJoCo 中做 sim2sim 验证，按成功率门禁给模型版本打标签。
+  - 一个 OSMO 工作流完成：T4 上用 Isaac Lab 训练策略 → 在 AzureML 注册模型 → 在 MuJoCo 和 Gazebo 中做 sim2sim 验证，按成功率门禁给模型版本打上 passed / failed 标签。
   - 数据来自私网 ADLS Gen2 数据湖，注册为 AzureML 数据资产；全部使用 Workload Identity 访问。
 - **已知限制**：见 [deploy/README.zh-CN.md](deploy/README.zh-CN.md#已知限制第一阶段)。例如，在 OSMO 6.4 发布之前，workflow-data 需要依赖 SAS 轮换器这一变通方案；订阅每晚会自动停机。

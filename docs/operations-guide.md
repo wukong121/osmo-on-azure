@@ -173,14 +173,14 @@ ContainerLogV2
 
 闭环工作流（`deploy/scripts/07-azureml-loop.sh`，说明见 [azureml-loop.md](azureml-loop.md)）把记录写进 AzureML 工作区（`terraform output aml_workspace_name`）。打开 https://ml.azure.com 并选择该工作区：
 
-- **Jobs → 实验 `cartpole-rl`**：训练运行的奖励、损失曲线和超参数；子运行 `sim2sim-mujoco` 是仿真验证结果。
+- **Jobs → 实验 `cartpole-rl`**：训练运行的奖励、损失曲线和超参数；子运行 `sim2sim-mujoco` 和 `sim2sim-gazebo` 是两个仿真器的验证结果。
 - **Models → `cartpole-policy`**：按标签 `sim2sim_validation` 查看每个版本是否通过验证，`osmo_workflow_id` 指向产生它的 OSMO 工作流。
 - **Data → `cartpole-sim2sim-scenarios`**：验证集版本。
 
 命令行查看：
 
 ```bash
-az ml model list -n cartpole-policy -g <资源组> -w <工作区> --query "[].{v:version,result:tags.sim2sim_validation,rate:tags.sim2sim_success_rate,wf:tags.osmo_workflow_id}" -o table
+az ml model list -n cartpole-policy -g <资源组> -w <工作区> --query "[].{v:version,result:tags.sim2sim_validation,mujoco:tags.sim2sim_mujoco,gazebo:tags.sim2sim_gazebo,wf:tags.osmo_workflow_id}" -o table
 ```
 
 AzureML 存储和数据湖只走私网，从 VNet 外无法在 Studio 里预览产物文件，但指标、标签和血缘可以正常查看。

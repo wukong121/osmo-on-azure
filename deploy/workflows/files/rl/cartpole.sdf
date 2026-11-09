@@ -1,0 +1,64 @@
+<?xml version="1.0"?>
+<!--
+  Gazebo (gz-sim 8 / SDF 1.10) port of the Isaac Lab "Isaac-Cartpole" robot, used for sim2sim
+  validation. Same parameters as cartpole.xml (MuJoCo) and the Isaac Lab cartpole asset:
+    - cart: box 0.25 x 0.20 x 0.20 m, 1 kg; prismatic joint along +X, limits +-4 m, damping 10
+    - pole: box 0.06 x 0.04 x 1.0 m, 1 kg, center of mass 0.47 m above the hinge; hinge axis -Y
+    - physics: DART, 1/120 s step, run as fast as possible (real_time_factor 0)
+  Inertias are given explicitly (solid boxes). Collisions are omitted: nothing touches anything.
+-->
+<sdf version="1.10">
+  <world name="cartpole_world">
+    <physics name="fixed_120hz" type="dart">
+      <max_step_size>0.008333333333</max_step_size>
+      <real_time_factor>0</real_time_factor>
+    </physics>
+    <gravity>0 0 -9.81</gravity>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+
+    <model name="cartpole">
+      <link name="rail">
+        <pose>0 0 2 0 0 0</pose>
+        <inertial><mass>1</mass><inertia><ixx>1</ixx><iyy>1</iyy><izz>1</izz></inertia></inertial>
+      </link>
+      <joint name="world_to_rail" type="fixed">
+        <parent>world</parent>
+        <child>rail</child>
+      </joint>
+
+      <link name="cart">
+        <pose>0 0 2 0 0 0</pose>
+        <inertial>
+          <mass>1</mass>
+          <inertia><ixx>0.006667</ixx><iyy>0.008542</iyy><izz>0.008542</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="slider_to_cart" type="prismatic">
+        <parent>rail</parent>
+        <child>cart</child>
+        <axis>
+          <xyz>1 0 0</xyz>
+          <limit><lower>-4</lower><upper>4</upper><effort>400</effort></limit>
+          <dynamics><damping>10</damping></dynamics>
+        </axis>
+      </joint>
+
+      <link name="pole">
+        <pose>0 -0.12 2 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0.47 0 0 0</pose>
+          <mass>1</mass>
+          <inertia><ixx>0.083467</ixx><iyy>0.083633</iyy><izz>0.000433</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="cart_to_pole" type="revolute">
+        <parent>cart</parent>
+        <child>pole</child>
+        <axis>
+          <xyz>0 -1 0</xyz>
+          <limit><lower>-1e16</lower><upper>1e16</upper></limit>
+        </axis>
+      </joint>
+    </model>
+  </world>
+</sdf>
