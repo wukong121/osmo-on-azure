@@ -6,3 +6,12 @@
 *.crt
 __pycache__/
 *.pyc
+
+# Local working notes (handoff docs etc.), never committed
+temp/
+
+# Customer-specific robot / policy sources for 08-legged-sim2sim.sh
+deploy/scripts/legged.env
+
+# Customer-specific background, kept locally only (purged from git history)
+docs/background.md

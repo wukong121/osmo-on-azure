@@ -1,0 +1,106 @@
+# Point-foot biped sim2sim, preparation (run once per dataset version / policy release):
+#
+#   seed-scenarios   Fetch the robot description (MJCF + meshes) from <robot_description_repo>,
+#                    generate the scenario set <profile> (velocity commands x friction x payload x
+#                    push x latency; see files/legged/scenarios.py), upload both to the data lake
+#                    and register the AzureML data asset <dataset>:<dataset_version>.
+#   import-policies  Fetch exported policies (params.yaml + policy/<rl_type>/{policy,encoder}.onnx)
+#                    from <policy_repo> and register each rl_type as a new version of <model_name>.
+#
+# Either task can be switched off (seed_data=false / import_policies=false).
+# Submit with deploy/scripts/08-legged-sim2sim.sh, which fills in the workspace coordinates and
+# the robot / policy sources.
+workflow:
+  name: legged-seed
+  timeout:
+    exec_timeout: 20m
+    queue_timeout: 15m
+  resources:
+    cpu2:
+      cpu: 2
+      memory: 4Gi
+      storage: 5Gi
+  tasks:
+{% if seed_data|string|lower in ['true', '1', 'yes'] %}
+  - name: seed-scenarios
+    image: python:3.12-slim
+    resource: cpu2
+    files:
+    - localpath: files/rl/aml_common.py
+      path: /opt/legged/aml_common.py
+    - localpath: files/rl/data_assets.py
+      path: /opt/legged/data_assets.py
+    - localpath: files/legged/scenarios.py
+      path: /opt/legged/scenarios.py
+    - localpath: files/legged/assets.py
+      path: /opt/legged/assets.py
+    environment:
+      AML_SUBSCRIPTION_ID: "{{aml_subscription_id}}"
+      AML_RESOURCE_GROUP: "{{aml_resource_group}}"
+      AML_WORKSPACE: "{{aml_workspace}}"
+      AML_DATASTORE: "{{aml_datastore}}"
+      OSMO_WORKFLOW_ID: "{{workflow_id}}"
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -euo pipefail
+      apt-get update -qq && apt-get install -y -qq --no-install-recommends git ca-certificates >/dev/null
+      pip install --quiet --no-cache-dir azure-ai-ml==1.35.2 azure-identity==1.27.0 azure-storage-blob==12.27.1 numpy
+      git clone --quiet --depth 1 "{{robot_description_repo}}" /tmp/robot
+      cd /opt/legged
+      python assets.py seed --robot-dir "/tmp/robot/{{robot_path}}" --robot-type "{{robot_type}}" \
+        --profile "{{profile}}" --version "{{dataset_version}}" --name "{{dataset}}"
+{% endif %}
+{% if import_policies|string|lower in ['true', '1', 'yes'] %}
+  - name: import-policies
+    image: python:3.12-slim
+    resource: cpu2
+    files:
+    - localpath: files/rl/aml_common.py
+      path: /opt/legged/aml_common.py
+    - localpath: files/rl/data_assets.py
+      path: /opt/legged/data_assets.py
+    - localpath: files/legged/scenarios.py
+      path: /opt/legged/scenarios.py
+    - localpath: files/legged/assets.py
+      path: /opt/legged/assets.py
+    environment:
+      AML_SUBSCRIPTION_ID: "{{aml_subscription_id}}"
+      AML_RESOURCE_GROUP: "{{aml_resource_group}}"
+      AML_WORKSPACE: "{{aml_workspace}}"
+      OSMO_WORKFLOW_ID: "{{workflow_id}}"
+      GIT_PYTHON_REFRESH: quiet  # mlflow probes for git
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -euo pipefail
+      apt-get update -qq && apt-get install -y -qq --no-install-recommends git ca-certificates >/dev/null
+      pip install --quiet --no-cache-dir azure-ai-ml==1.35.2 azure-identity==1.27.0 azure-storage-blob==12.27.1 \
+        mlflow-skinny==3.15.0 azureml-mlflow==1.62.0.post6 numpy
+      git clone --quiet --depth 1 "{{policy_repo}}" /tmp/policies
+      COMMIT=$(git -C /tmp/policies rev-parse HEAD)
+      RL_ARGS=(); for t in {{rl_types}}; do RL_ARGS+=(--rl-type "$t"); done
+      cd /opt/legged
+      python assets.py import --policy-root "/tmp/policies/{{policy_path}}" --robot-type "{{robot_type}}" \
+        "${RL_ARGS[@]}" --model-name "{{model_name}}" --experiment "{{experiment}}" \
+        --source-repo "{{policy_repo}}" --source-commit "$COMMIT"
+{% endif %}
+
+default-values:
+  aml_subscription_id: ""
+  aml_resource_group: ""
+  aml_workspace: ""
+  aml_datastore: robotics_data
+  seed_data: true
+  import_policies: true
+  robot_description_repo: ""   # git URL of the robot description (MJCF under <robot_path>/xml, meshes under <robot_path>/meshes)
+  robot_path: ""
+  robot_type: ""
+  policy_repo: ""              # git URL with exported policies under <policy_path>
+  policy_path: ""
+  rl_types: "isaacgym isaaclab"
+  dataset: pointfoot-sim2sim-scenarios
+  dataset_version: "1"
+  profile: v1
+  model_name: pointfoot-policy
+  experiment: pointfoot-sim2sim

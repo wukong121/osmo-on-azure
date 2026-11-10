@@ -145,7 +145,7 @@
    - KAI 用 0.14.x。GPU Operator 负责安装 T4 驱动，驱动版本见 `docs/t4-feasibility.md`。
 3. **认证**：第一阶段可以先用 dev 模式或管理员 token，把主链路跑通。接着通过 oauth2-proxy 接 Entra ID（OIDC），这一步基本就是验证时序图里的“1. 认证与授权”。
 4. **访问**：第一阶段 OSMO UI/API 先用 port-forward 访问，或者只开内部 LB。正式接入方式在网络方案里再定。
-5. **验收**：以 OSMO 自带的 `verify-hello`、`verify-gpu`、`verify-object-storage` 为基础，对照时序图的 8 个阶段逐项验证，见 `docs/background.md` 4.4 节。
+5. **验收**：以 OSMO 自带的 `verify-hello`、`verify-gpu`、`verify-object-storage` 为基础，对照时序图的 8 个阶段逐项验证。
 
 ## 5. 部署实测补充（2026-11-05）
 

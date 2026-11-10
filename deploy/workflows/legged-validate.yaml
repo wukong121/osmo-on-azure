@@ -1,0 +1,126 @@
+# Point-foot biped sim2sim validation at scale: model registry -> N parallel MuJoCo shards -> gate.
+#
+#   fetch        Resolve the models under test in the AzureML registry and download them, plus the
+#                scenario data asset (robot MJCF + scenarios) from the data lake:
+#                  models=<name>:<version>  candidate + current champion (tag stage=production)
+#                  models=<name>:all        every registered version (re-validation on new data)
+#   validate-i   Shard i of <shards>: every model on scenarios with id % shards == i, in MuJoCo
+#                (headless, deterministic, 1 kHz physics / 50 Hz policy). Pure simulation.
+#   gate         Merge the shards, score each model on the in-distribution scenarios
+#                (fall rate <= max_fall_rate, velocity RMSE <= max_lin_vel_rmse), break failures
+#                down by stress factor, log one MLflow run per model, tag the model versions, and
+#                (mode=promote) promote the candidate to stage=production if it passes and is not
+#                worse than the champion. Fails the workflow when the candidate fails the gate
+#                (promote) or the production model no longer passes (revalidate).
+#
+# Prepare the data asset and the model versions with legged-seed.yaml first.
+# Submit with deploy/scripts/08-legged-sim2sim.sh.
+workflow:
+  name: legged-validate
+  timeout:
+    exec_timeout: 60m
+    queue_timeout: 30m
+  resources:
+    cpu1:
+      cpu: 1
+      memory: 2Gi
+      storage: 2Gi
+    cpu2:
+      cpu: 2
+      memory: 4Gi
+      storage: 5Gi
+  tasks:
+  - name: fetch
+    image: python:3.12-slim
+    resource: cpu2
+    files:
+    - localpath: files/rl/aml_common.py
+      path: /opt/legged/aml_common.py
+    - localpath: files/rl/data_assets.py
+      path: /opt/legged/data_assets.py
+    - localpath: files/legged/scenarios.py
+      path: /opt/legged/scenarios.py
+    - localpath: files/legged/assets.py
+      path: /opt/legged/assets.py
+    environment:
+      AML_SUBSCRIPTION_ID: "{{aml_subscription_id}}"
+      AML_RESOURCE_GROUP: "{{aml_resource_group}}"
+      AML_WORKSPACE: "{{aml_workspace}}"
+      OSMO_WORKFLOW_ID: "{{workflow_id}}"
+      GIT_PYTHON_REFRESH: quiet
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -euo pipefail
+      pip install --quiet --no-cache-dir azure-ai-ml==1.35.2 azure-identity==1.27.0 azure-storage-blob==12.27.1 \
+        mlflow-skinny==3.15.0 azureml-mlflow==1.62.0.post6 numpy
+      cd /opt/legged
+      python assets.py fetch --models "{{models}}" --dataset "{{dataset}}" --experiment "{{experiment}}" --out {{output}}
+      cat {{output}}/models/models.json {{output}}/data/data_asset.json
+
+{% for i in range(shards) %}
+  - name: validate-{{i}}
+    image: python:3.12-slim
+    resource: cpu1
+    inputs:
+    - task: fetch
+    files:
+    - localpath: files/legged/pointfoot_sim.py
+      path: /opt/legged/pointfoot_sim.py
+    - localpath: files/legged/validate_shard.py
+      path: /opt/legged/validate_shard.py
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -euo pipefail
+      pip install --quiet --no-cache-dir mujoco==3.17.0 onnxruntime==1.31.1 numpy scipy pyyaml
+      cd /opt/legged
+      python validate_shard.py --data-dir {{input:0}}/data --models-dir {{input:0}}/models \
+        --shard {{i}} --shards {{shards}} --out {{output}}
+{% endfor %}
+
+  - name: gate
+    image: python:3.12-slim
+    resource: cpu2
+    inputs:
+    - task: fetch
+{% for i in range(shards) %}
+    - task: validate-{{i}}
+{% endfor %}
+    files:
+    - localpath: files/rl/aml_common.py
+      path: /opt/legged/aml_common.py
+    - localpath: files/legged/gate.py
+      path: /opt/legged/gate.py
+    environment:
+      AML_SUBSCRIPTION_ID: "{{aml_subscription_id}}"
+      AML_RESOURCE_GROUP: "{{aml_resource_group}}"
+      AML_WORKSPACE: "{{aml_workspace}}"
+      OSMO_WORKFLOW_ID: "{{workflow_id}}"
+      GIT_PYTHON_REFRESH: quiet
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -euo pipefail
+      pip install --quiet --no-cache-dir azure-ai-ml==1.35.2 azure-identity==1.27.0 \
+        mlflow-skinny==3.15.0 azureml-mlflow==1.62.0.post6 matplotlib
+      # Every validate-i output folder holds a shard.json (input folders are siblings of input 0)
+      SHARDS=(); while read -r f; do SHARDS+=(--shard-dir "$(dirname "$f")"); done \
+        < <(find "$(dirname {{input:0}})" -name shard.json | sort)
+      echo "found $(find "$(dirname {{input:0}})" -name shard.json | wc -l) shards (expected {{shards}})"
+      cd /opt/legged
+      python gate.py --models-json {{input:0}}/models/models.json --data-asset-json {{input:0}}/data/data_asset.json \
+        "${SHARDS[@]}" --mode "{{mode}}" --max-fall-rate {{max_fall_rate}} --max-lin-vel-rmse {{max_lin_vel_rmse}} \
+        --experiment "{{experiment}}" --out {{output}}
+
+default-values:
+  aml_subscription_id: ""
+  aml_resource_group: ""
+  aml_workspace: ""
+  models: "pointfoot-policy:1"
+  dataset: pointfoot-sim2sim-scenarios
+  mode: promote
+  shards: 10
+  max_fall_rate: 0.05
+  max_lin_vel_rmse: 0.3
+  experiment: pointfoot-sim2sim

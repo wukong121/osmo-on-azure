@@ -14,12 +14,12 @@ _Edges: green = private (VNet / Private Link) · orange dashed = public entry (A
 
 | Document | Contents |
 |---|---|
-| [docs/background.md](docs/background.md) (Chinese) | Project background, technology choices, PoC success criteria, open items |
 | [docs/reference-repos.md](docs/reference-repos.md) (Chinese) | Review of the reference repos (NVIDIA/OSMO, microsoft/physical-ai-toolchain): version choice, PostgreSQL TLS, reusable parts |
 | [docs/operations-guide.md](docs/operations-guide.md) (Chinese) | Operations guide: resume the environment, log in, view workflow history and logs, check resources, cost control, troubleshooting |
 | [docs/azureml-loop.md](docs/azureml-loop.md) (Chinese) | OSMO + AzureML closed loop: data lake → Isaac Lab training on T4 → MLflow tracking and model registry → sim2sim validation in MuJoCo and Gazebo |
+| [docs/legged-sim2sim.md](docs/legged-sim2sim.md) (Chinese) | Sim2sim validation at scale for a point-foot biped: 1000+ scenarios sharded across the CPU pool, gate on fall rate and velocity tracking, champion/challenger promotion in the AzureML model registry |
 | [docs/t4-feasibility.md](docs/t4-feasibility.md) (Chinese) | Feasibility of running Isaac Lab / Isaac Sim / MuJoCo / Gazebo on T4 GPUs |
-| [docs/images/](docs/images/) | Azure architecture, OSMO + AzureML closed-loop sequence, OSMO deployment architecture, OSMO workflow sequence |
+| [docs/images/](docs/images/) | Azure architecture, OSMO + AzureML closed-loop sequence, legged sim2sim sequence, OSMO deployment architecture, OSMO workflow sequence |
 | [infra/terraform/](infra/terraform/README.md) | Azure infrastructure: AKS (system, CPU and T4 Spot GPU pools), private data services, static ingress IP, AzureML workspace and robotics data lake |
 | [deploy/](deploy/README.md) | OSMO 6.3.1 deployment (GPU Operator, KAI, OSMO service, backend operator, Traefik, Keycloak), acceptance checks and simulation samples |
 
@@ -48,4 +48,7 @@ _Edges: green = private (VNet / Private Link) · orange dashed = public entry (A
   - OSMO runs the work; AzureML is the system of record for experiments (MLflow), models and data assets.
   - One OSMO workflow trains a policy with Isaac Lab on T4, registers it in AzureML, validates it in MuJoCo and Gazebo (sim2sim), and a success-rate gate tags the model version as passed or failed.
   - Data comes from a private ADLS Gen2 data lake registered as an AzureML data asset. All access uses Workload Identity.
+- **Legged robot sim2sim at scale** ([docs/legged-sim2sim.md](docs/legged-sim2sim.md)):
+  - Replaces manual, joystick-driven sim2sim checks: two pretrained point-foot biped policies run through 1000–1200 MuJoCo scenarios (velocity commands × friction × payload × push × latency) in 10 parallel OSMO tasks.
+  - A gate on fall rate and velocity tracking decides which version becomes `stage=production` (champion/challenger), and a new scenario-set version re-validates every registered model.
 - **Known limitations**: see [deploy/README.md](deploy/README.md#known-limitations-phase-1). For example, the workflow-data SAS workaround stays in place until OSMO 6.4, and the subscription shuts the environment down every night.

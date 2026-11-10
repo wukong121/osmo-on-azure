@@ -86,7 +86,9 @@ def download(args: argparse.Namespace) -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     cc = container_client(client, datastore)
-    for blob in cc.list_blobs(name_starts_with=prefix):
+    for blob in cc.list_blobs(name_starts_with=prefix, include=["metadata"]):
+        if (blob.metadata or {}).get("hdi_isfolder") == "true":  # ADLS Gen2 directory entry
+            continue
         target = out / blob.name[len(prefix):]
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(cc.download_blob(blob.name).readall())

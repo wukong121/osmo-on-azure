@@ -18,6 +18,7 @@ This directory deploys NVIDIA OSMO 6.3.1 onto the AKS cluster created by [infra/
 | Keycloak (browser login, optional) | Keycloak Operator 26.8.2 (official manifests) | `keycloak` | OIDC provider at `https://<hostname>/auth`, realm `osmo`. Groups `osmo-admins` / `osmo-users` map to OSMO roles through the token `roles` claim. Database `keycloak` on the existing PostgreSQL (dedicated login, TLS). |
 | Workflow-data SAS rotator | [manifests/workflow-data-sas-rotator.yaml](manifests/workflow-data-sas-rotator.yaml) | `osmo` | A CronJob that works around an OSMO 6.3.1 bug (see below). Remove it after upgrading to OSMO 6.4. |
 | AzureML closed loop (optional) | [workflows/rl-train-validate.yaml](workflows/rl-train-validate.yaml), [workflows/azureml-seed-data.yaml](workflows/azureml-seed-data.yaml) | `osmo-workflows` | Plain OSMO workflows that call AzureML (MLflow, model registry, data assets) with Workload Identity. Nothing is installed in the cluster. See [docs/azureml-loop.md](../docs/azureml-loop.md). |
+| Legged sim2sim at scale (optional) | [workflows/legged-seed.yaml](workflows/legged-seed.yaml), [workflows/legged-validate.yaml](workflows/legged-validate.yaml) | `osmo-workflows` | Point-foot biped policies validated in MuJoCo across N parallel CPU tasks, gated and promoted in the AzureML model registry. Robot and policy sources come from `scripts/legged.env` (see `legged.env.example`). See [docs/legged-sim2sim.md](../docs/legged-sim2sim.md). |
 
 ## Phase-1 design
 
@@ -71,6 +72,7 @@ OSMO_HOSTNAME=osmo.example.com KEYCLOAK_ADMINS="alice@example.com" KEYCLOAK_USER
 
 # Optional: AzureML closed loop (needs infra/terraform/azureml.tf applied)
 deploy/scripts/07-azureml-loop.sh       # seed data asset, then train (T4) -> register -> sim2sim validation (MuJoCo + Gazebo) -> gate
+deploy/scripts/08-legged-sim2sim.sh seed import validate   # legged robot: scenario set + policies, then sharded MuJoCo validation -> gate
 
 # After the cluster was stopped (e.g. nightly auto-shutdown)
 deploy/scripts/00-resume.sh
@@ -127,6 +129,7 @@ The gateway was also checked directly:
 | `mujoco` (optional) | [mujoco-sim.yaml](workflows/mujoco-sim.yaml) | MuJoCo 3.17 headless simulation on the CPU platform (`npcpu`): double pendulum plus falling boxes, 10 s simulated. Checks that the boxes come to rest and uploads `trajectory.csv` and `summary.txt`. | ✅ (2026-11-06) |
 | `gazebo` (optional) | [gazebo-sim.yaml](workflows/gazebo-sim.yaml) | Gazebo Harmonic (gz-sim 8.11, `osrf/ros:jazzy-simulation`) headless server on `npcpu`: 50,000 iterations of [files/falling_shapes.sdf](workflows/files/falling_shapes.sdf) in about 11 s. Uploads the recorded `state.tlog`. | ✅ (2026-11-06) |
 | `07-azureml-loop.sh` (optional) | [rl-train-validate.yaml](workflows/rl-train-validate.yaml) | Data lake → AzureML data asset; Isaac Lab training on T4 with ONNX export; MLflow run and model registration in AzureML; sim2sim validation of the ONNX policy in MuJoCo and Gazebo Harmonic in parallel (100 scenarios each); a gate task logs both runs and tags the model version passed/failed | ✅ (2026-11-09): 100/100 episodes in both simulators; an under-trained policy (5 iterations) is rejected by the gate |
+| `08-legged-sim2sim.sh` (optional) | [legged-validate.yaml](workflows/legged-validate.yaml) | Scenario set (1000/1200 scenarios: velocity commands × friction × payload × push × latency) and pretrained point-foot policies registered in AzureML; 10 MuJoCo shards in parallel on the CPU pool; gate on in-distribution fall rate and velocity RMSE with champion/challenger promotion | ✅ (2026-11-10): promotion, gate rejection and re-validation on a new scenario-set version all exercised; see [docs/legged-sim2sim.md](../docs/legged-sim2sim.md) |
 
 Run a subset with `deploy/scripts/04-verify.sh hello storage`, or the simulation samples with `deploy/scripts/04-verify.sh isaaclab mujoco gazebo`.
 
