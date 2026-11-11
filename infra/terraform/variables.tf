@@ -185,6 +185,42 @@ variable "acr_enabled" {
   default     = true
 }
 
+variable "external_backends_enabled" {
+  description = "是否模拟外部计算后端（其他云 / 本地机房）：创建外部 k3s 虚拟机，并按白名单开放数据组件的公网访问（见 external.tf）"
+  type        = bool
+  default     = false
+}
+
+variable "external_location" {
+  description = "外部 k3s 虚拟机所在区域（模拟其他云厂商；默认 Southeast Asia，离中国大陆近）"
+  type        = string
+  default     = "southeastasia"
+}
+
+variable "external_vm_size" {
+  description = "外部 k3s 虚拟机规格（部分订阅在亚洲区域只开放少数系列，如 L 系列）"
+  type        = string
+  default     = "Standard_L16as_v4"
+}
+
+variable "external_ssh_public_key_path" {
+  description = "外部 k3s 虚拟机的 SSH 公钥文件"
+  type        = string
+  default     = "~/.ssh/id_rsa.pub"
+}
+
+variable "external_extra_cidrs" {
+  description = "其他外部集群（如本地机房）的出口 IP（CIDR），允许访问 ACR 公网端点和存储网关"
+  type        = list(string)
+  default     = []
+}
+
+variable "external_oidc_issuers" {
+  description = "外部集群的服务账号令牌签发方（键为集群名），与 OSMO 托管身份建立联邦凭据"
+  type        = map(string)
+  default     = {}
+}
+
 variable "gpu_node_pool_enabled" {
   description = "是否创建 GPU 节点池"
   type        = bool

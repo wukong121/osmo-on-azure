@@ -1,0 +1,125 @@
+# Train a point-foot biped locomotion policy on a GPU pool and register it in AzureML.
+#
+#   train     Isaac Lab (Isaac Sim based, image isaac-lab:2.1.0) + the vendor's RL extension from
+#             <train_repo>: PPO for <max_iterations> iterations, headless, then the vendor's play
+#             script exports policy.onnx + encoder.onnx (stopped once the export exists).
+#   register  Replays the TensorBoard metrics into an MLflow run (experiment <experiment>) and
+#             registers the exported policy as a new version of <model_name> (rl_type isaaclab,
+#             sim2sim_validation=pending). params.yaml (deployment interface) comes from
+#             <policy_repo>/<policy_path>, like the imported pretrained policies.
+#
+# from_workflow=<id>: skip training and register the train task output of that earlier workflow
+# (e.g. when training succeeded but registration failed).
+#
+# Meant for any pool with a GPU platform; the PoC runs it on the on-prem pool (onprem-h100, H100).
+# Submit with deploy/scripts/08-legged-sim2sim.sh train (POOL / TRAIN_PLATFORM / LEGGED_SET).
+workflow:
+  name: legged-train
+  timeout:
+    exec_timeout: 6h
+    queue_timeout: 60m
+  resources:
+    gpu:
+      platform: "{{train_platform}}"
+      gpu: 1
+      cpu: 16
+      memory: 96Gi
+      storage: 80Gi
+    cpu2:
+      cpu: 2
+      memory: 4Gi
+      storage: 5Gi
+  tasks:
+{% if not from_workflow %}
+  - name: train
+    image: nvcr.io/nvidia/isaac-lab:2.1.0
+    resource: gpu
+    environment:
+      ACCEPT_EULA: "Y"
+      PRIVACY_CONSENT: "Y"
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -euo pipefail
+      nvidia-smi -L
+      git clone --quiet --depth 1 "{{train_repo}}" /tmp/train && cd /tmp/train
+      echo "source commit: $(git rev-parse HEAD)"
+      PY=/workspace/isaaclab/_isaac_sim/python.sh
+      # The extension vendors its own rsl_rl (with the encoder); remove the image's rsl-rl-lib
+      $PY -m pip uninstall -y -q rsl-rl-lib >/dev/null 2>&1 || true
+      $PY -m pip install -q toml >/dev/null 2>&1
+      $PY -m pip install -q --no-build-isolation -e exts/bipedal_locomotion -e rsl_rl
+      export PYTHONPATH=/tmp/train/rsl_rl:${PYTHONPATH:-}
+      $PY scripts/rsl_rl/train.py --task "{{task}}" --num_envs {{num_envs}} --headless \
+        --max_iterations {{max_iterations}} 2>&1 | grep -E --line-buffered "Learning iteration|Mean reward|Mean episode length|Iteration time|Traceback|Error" || true
+      RUN_DIR=$(ls -td logs/rsl_rl/*/*/ | head -1); RUN_DIR=${RUN_DIR%/}
+      test -n "$(ls "$RUN_DIR"/model_*.pt 2>/dev/null)" || { echo "no checkpoint in $RUN_DIR"; exit 1; }
+      CKPT=$(ls -v "$RUN_DIR"/model_*.pt | tail -1)
+      echo "exporting $CKPT"
+      # play.py writes exported/{policy,encoder}.onnx, then runs an endless playback loop
+      $PY scripts/rsl_rl/play.py --task "{{task}}" --num_envs 1 --headless --checkpoint_path "$CKPT" > /tmp/play.log 2>&1 &
+      PID=$!
+      for _ in $(seq 1 120); do
+        [ -f "$RUN_DIR/exported/encoder.onnx" ] && [ -f "$RUN_DIR/exported/policy.onnx" ] && break
+        kill -0 "$PID" 2>/dev/null || break
+        sleep 5
+      done
+      sleep 5; kill "$PID" 2>/dev/null || true; wait "$PID" 2>/dev/null || true
+      test -f "$RUN_DIR/exported/policy.onnx" || { tail -40 /tmp/play.log; exit 1; }
+      mkdir -p {{output}}
+      cp -r "$RUN_DIR" {{output}}/run
+      git rev-parse HEAD > {{output}}/run/source_commit
+      find {{output}} -maxdepth 3 -type f | sort | head -30
+
+{% endif %}
+  - name: register
+    image: python:3.12-slim
+    resource: cpu2
+    inputs:
+    - task: "{{ (from_workflow ~ ':train') if from_workflow else 'train' }}"
+    files:
+    - localpath: files/rl/aml_common.py
+      path: /opt/legged/aml_common.py
+    - localpath: files/rl/data_assets.py
+      path: /opt/legged/data_assets.py
+    - localpath: files/legged/scenarios.py
+      path: /opt/legged/scenarios.py
+    - localpath: files/legged/assets.py
+      path: /opt/legged/assets.py
+    environment:
+      AML_SUBSCRIPTION_ID: "{{aml_subscription_id}}"
+      AML_RESOURCE_GROUP: "{{aml_resource_group}}"
+      AML_WORKSPACE: "{{aml_workspace}}"
+      OSMO_WORKFLOW_ID: "{{workflow_id}}"
+      GIT_PYTHON_REFRESH: quiet
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -euo pipefail
+      apt-get update -qq && apt-get install -y -qq --no-install-recommends git ca-certificates >/dev/null
+      pip install --quiet --no-cache-dir azure-ai-ml==1.35.2 azure-identity==1.27.0 azure-storage-blob==12.27.1 \
+        mlflow-skinny==3.15.0 azureml-mlflow==1.62.0.post6 tensorboard==2.21.0 numpy
+      git clone --quiet --depth 1 "{{policy_repo}}" /tmp/policies
+      cd /opt/legged
+      python assets.py register-trained --run-dir {{input:0}}/run \
+        --params "/tmp/policies/{{policy_path}}/params.yaml" --robot-type "{{robot_type}}" \
+        --task "{{task}}" --model-name "{{model_name}}" --experiment "{{experiment}}" \
+        --source-repo "{{train_repo}}" --pool "{{pool_label}}" --out {{output}}
+      cat {{output}}/model.json
+
+default-values:
+  aml_subscription_id: ""
+  aml_resource_group: ""
+  aml_workspace: ""
+  train_repo: ""          # git URL of the RL training extension
+  policy_repo: ""         # git URL with the deployment params.yaml (same as legged-seed.yaml)
+  policy_path: ""
+  robot_type: ""
+  task: ""              # Isaac Lab task ID of the training extension
+  num_envs: 4096
+  max_iterations: 2000
+  train_platform: gpu
+  pool_label: ""
+  from_workflow: ""       # register the train output of an earlier workflow instead of training again
+  model_name: pointfoot-policy
+  experiment: pointfoot-sim2sim

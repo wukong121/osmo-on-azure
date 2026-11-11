@@ -22,7 +22,8 @@ _连线说明：绿色 = 私网（VNet / Private Link）· 橙色虚线 = 公网
 | CPU 作业节点池（`npcpu`） | — | `Standard_D8s_v4` × 1–3，带 taint `osmo/workload=cpu:NoSchedule`，专门运行 OSMO 的 CPU 任务（`default` 平台）。请至少保留 1 台：平台没有空闲资源时，OSMO 会直接拒绝提交 |
 | 公网入口（Traefik） | 固定公网 IP `pip-<base>-ingress`，以及 `snet-aks` 上的 NSG `nsg-<base>-aks` | 只允许来自 Internet、访问入口 IP 80/443 端口的流量。Traefik 绑定到这个 IP（见 deploy/README.zh-CN.md 第 5 步） |
 | AzureML 工作区（`azureml.tf`） | 公网端点（Entra ID + RBAC 保护，由 `aml_public_network_access_enabled` 控制，默认开启，便于在浏览器里使用 Studio），另有私有终结点 | Basic SKU，系统分配标识，默认存储用 Identity 访问（不用 Shared Key）。作为实验（MLflow）、模型和数据资产的记录系统。**不安装** AzureML 的 AKS 扩展，执行仍由 OSMO 负责 |
-| 容器镜像仓库 ACR（`acr.tf`，`acr_enabled`，默认开启） | 仅私网（PE） | Premium（私有终结点需要），不启用管理员账号。AKS kubelet 身份有 AcrPull；OSMO 工作负载身份有 AcrPush，镜像由 OSMO 任务在集群内构建并推送（`deploy/workflows/build-image.yaml`）。存放预构建的仿真镜像，如 Gazebo（ROS 2）镜像 |
+| 容器镜像仓库 ACR（`acr.tf`，`acr_enabled`，默认开启） | 私有终结点；启用外部后端时另开放公网端点，只放行外部出口 IP | Premium（私有终结点需要），不启用管理员账号。AKS kubelet 身份有 AcrPull；OSMO 工作负载身份有 AcrPush，镜像由 OSMO 任务在集群内构建并推送（`deploy/workflows/build-image.yaml`）。存放预构建的仿真镜像，如 Gazebo（ROS 2）镜像 |
+| 外部算力模拟（`external.tf`，`external_backends_enabled`，默认关闭） | k3s 虚拟机，独立资源组、VNet 和区域（`external_location`，默认 Southeast Asia）；没有任何入站规则（运维用 `az vm run-command`） | 模拟其他云的集群。把外部出口 IP（`external_extra_cidrs` + 这台虚拟机）加入 ACR 白名单和存储网关白名单（输出 `external_access_cidrs`），并为每个外部 OIDC 签发方（`external_oidc_issuers`）在 OSMO 身份上建一条联合凭据。存储账号保持仅私网 |
 | AzureML 默认存储 / 机器人数据湖（ADLS Gen2） | 仅私网（私有终结点：blob + file / blob + dfs） | 禁用 Shared Key。数据湖模拟客户的机器人数据存储，注册为 AzureML 数据存储 `robotics_data`（Identity 访问） |
 
 平台组件的镜像直接从 nvcr.io 等公共仓库拉取；私有 ACR 只存放需要预构建的仿真镜像。

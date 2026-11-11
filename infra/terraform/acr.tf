@@ -10,15 +10,20 @@
 resource "azurerm_container_registry" "main" {
   count = var.acr_enabled ? 1 : 0
 
-  name                          = local.names.acr
-  location                      = azurerm_resource_group.main.location
-  resource_group_name           = azurerm_resource_group.main.name
-  sku                           = "Premium"
-  admin_enabled                 = false
-  public_network_access_enabled = false
+  name                = local.names.acr
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  sku                 = "Premium"
+  admin_enabled       = false
+  # 默认仅私网；启用外部计算后端后按 IP 白名单开放（见 external.tf）
+  public_network_access_enabled = local.ext_enabled
   network_rule_bypass_option    = "AzureServices"
-  zone_redundancy_enabled       = false
-  tags                          = local.tags
+  network_rule_set = [{
+    default_action = "Deny"
+    ip_rule        = [for c in local.ext_cidrs : { action = "Allow", ip_range = c }]
+  }]
+  zone_redundancy_enabled = false
+  tags                    = local.tags
 }
 
 resource "azurerm_private_endpoint" "acr" {

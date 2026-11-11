@@ -55,9 +55,20 @@ endpoint="azure://${STORAGE_ACCOUNT}/${STORAGE_CONTAINER}"
 # private registry without stored credentials; skip that check for our registry instead of
 # storing a password in OSMO.
 acr_values=()
+# External compute backends (infra/terraform/external.tf, scripts/09-external-backend.sh): their pools
+if [[ -n "$(tf_out external_k3s_public_ip 2>/dev/null || true)" ]]; then
+  acr_values+=(-f "$VALUES_DIR/osmo-service-external.yaml")
+  info "External backends enabled: adding pools from osmo-service-external.yaml"
+  # Workflow pods (osmo-ctrl) reach the control plane at service_base_url; pods in external
+  # clusters cannot resolve the in-cluster gateway, so every backend uses the public URL
+  public_host="$(kubectl get ingress osmo-public -n "$NS_OSMO" -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || true)"
+  [[ -n "$public_host" ]] || fatal "external backends need the public endpoint (run 05-public-endpoint.sh first)"
+  acr_values+=(--set-string "services.configs.service.service_base_url=https://${public_host}")
+  info "service_base_url: https://${public_host}"
+fi
 ACR_HOST="$(tf_out acr_login_server 2>/dev/null || true)"
 if [[ -n "$ACR_HOST" ]]; then
-  acr_values=(--set-json "services.configs.workflow.credential_config.disable_registry_validation=[\"$ACR_HOST\"]")
+  acr_values+=(--set-json "services.configs.workflow.credential_config.disable_registry_validation=[\"$ACR_HOST\"]")
   info "Private registry $ACR_HOST: image pulls via the AKS kubelet identity"
 fi
 

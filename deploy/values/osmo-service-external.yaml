@@ -1,0 +1,77 @@
+# OSMO pools for external compute backends (other clouds / on-prem), merged on top of
+# osmo-service.yaml by scripts/02-osmo-service.sh when Terraform has external_backends_enabled.
+# Each backend is a Kubernetes cluster joined with scripts/09-external-backend.sh join <name> ...;
+# the pool name here must match that backend name.
+#
+#   ext-sg       a k3s cluster standing in for another cloud's Kubernetes (CPU), outside Azure's network
+#   onprem-h100  a k3s server with a large GPU standing in for on-prem compute (CPU and GPU tasks)
+#
+# Workflow pods run as ServiceAccount osmo-workflow with the Workload Identity label: on external
+# clusters the azure-workload-identity webhook exchanges the cluster's service-account token for an
+# Entra ID token of the OSMO managed identity (federated credential in infra/terraform/external.tf).
+services:
+  configs:
+    # In ConfigMap mode the agent only accepts backends declared here (runtime fields such as
+    # heartbeats still come from the backend operator)
+    backends:
+      ext-sg:
+        description: "External cloud (simulated): k3s in another network and region"
+        scheduler_settings: {scheduler_type: kai, scheduler_name: kai-scheduler, scheduler_timeout: 30}
+      onprem-h100:
+        description: "On-prem (simulated): k3s server with an H100"
+        scheduler_settings: {scheduler_type: kai, scheduler_name: kai-scheduler, scheduler_timeout: 30}
+    podTemplates:
+      # Larger /dev/shm for PyTorch / Isaac Lab on external GPU nodes
+      external_gpu:
+        spec:
+          volumes:
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: 16Gi
+          containers:
+            - name: "{{USER_CONTAINER_NAME}}"
+              volumeMounts:
+                - name: dshm
+                  mountPath: /dev/shm
+
+    resourceValidations:
+      gpu_required_external:
+        - operator: GE
+          left_operand: "{{USER_GPU}}"
+          right_operand: "1"
+          assert_message: "The gpu platform requires at least 1 GPU"
+
+    pools:
+      ext-sg:
+        description: "External cloud (simulated): k3s in another network and region; CPU tasks"
+        backend: ext-sg
+        default_platform: default
+        common_default_variables: {USER_CPU: 1, USER_GPU: 0, USER_MEMORY: "1Gi", USER_STORAGE: "1Gi"}
+        common_pod_template:
+          - default_ctrl
+          - default_user
+          - azure_workload_identity
+        platforms:
+          default:
+            resource_validations: [no_gpu]
+      onprem-h100:
+        description: "On-prem (simulated): k3s server with an H100; CPU and GPU tasks"
+        backend: onprem-h100
+        default_platform: default
+        common_default_variables: {USER_CPU: 1, USER_GPU: 0, USER_MEMORY: "1Gi", USER_STORAGE: "1Gi"}
+        common_pod_template:
+          - default_ctrl
+          - default_user
+          - azure_workload_identity
+        platforms:
+          default:
+            resource_validations: [no_gpu]
+          gpu:
+            override_pod_template: [external_gpu]
+            resource_validations: [gpu_required_external]
+            default_variables:
+              USER_GPU: 1
+              USER_CPU: 16
+              USER_MEMORY: "128Gi"
+              USER_STORAGE: "100Gi"

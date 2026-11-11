@@ -151,12 +151,23 @@ def main() -> None:
     p.add_argument("--experiment", default="pointfoot-sim2sim")
     p.add_argument("--out", required=True)
     p.add_argument("--offline", action="store_true", help="score only, no AzureML (local testing)")
+    p.add_argument("--expect-shards", action="append", default=[], metavar="SIM=N",
+                   help="fail unless exactly N shards of simulator SIM are present (N=0: none expected)")
     a = p.parse_args()
 
     models = json.loads(Path(a.models_json).read_text())["models"]
     data = json.loads(Path(a.data_asset_json).read_text())
     data_ref = f"{data['name']}:{data['version']}"
     rows, n_scen = load_rows(a.shard_dir)
+    found = {}
+    for d in a.shard_dir:
+        info = json.loads((Path(d) / "shard.json").read_text())
+        sim = "gazebo" if str(info.get("simulator", "")).startswith("gazebo") else "mujoco"
+        found[sim] = found.get(sim, 0) + 1
+    for item in a.expect_shards:
+        sim, _, want = item.partition("=")
+        if found.get(sim, 0) != int(want):
+            raise SystemExit(f"expected {want} {sim} shards, found {found.get(sim, 0)} (missing pool results?)")
     sims = sorted(n_scen)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)

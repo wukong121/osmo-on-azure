@@ -17,9 +17,10 @@ _连线说明：绿色 = 私网（VNet / Private Link）· 橙色虚线 = 公网
 | [docs/reference-repos.md](docs/reference-repos.md) | 参考仓库研读结论（NVIDIA/OSMO、microsoft/physical-ai-toolchain）：版本选择、PG TLS、可复用内容 |
 | [docs/operations-guide.md](docs/operations-guide.md) | 操作手册：恢复环境、登录、查看调度记录和日志、资源查看、成本控制、常见问题 |
 | [docs/azureml-loop.md](docs/azureml-loop.md) | OSMO + AzureML 闭环：数据湖 → T4 上 Isaac Lab 训练 → MLflow 实验跟踪和模型注册 → MuJoCo 和 Gazebo 中的 sim2sim 验证 |
-| [docs/legged-sim2sim.md](docs/legged-sim2sim.md) | 点足双足机器人在 MuJoCo 和 Gazebo（厂商 ROS 2 部署栈）中的 sim2sim 大规模验证：场景在 CPU 池上分片并行，按摔倒率和速度跟踪门禁，在 AzureML 模型注册表中做冠军 / 挑战者晋级 |
+| [docs/hybrid-robot-pipeline.md](docs/hybrid-robot-pipeline.md) | 混合云机器人训练与仿真验证流水线：Azure 上的一个 OSMO 控制面调度 AKS、其他云和本地 GPU；本地训练，MuJoCo 与 Gazebo（厂商 ROS 2 部署栈）验证分散到多个资源池，结果和门禁集中在 AzureML |
+| [docs/private-storage-security.md](docs/private-storage-security.md) | 多云 + 本地作业的私有存储安全设计：存储网关、联合身份、不使用密钥，对照安全最佳实践 |
 | [docs/t4-feasibility.md](docs/t4-feasibility.md) | T4 GPU 运行 Isaac Lab / Isaac Sim / MuJoCo / Gazebo 的可行性评估 |
-| [docs/images/](docs/images/) | Azure 部署架构图、OSMO + AzureML 闭环时序图、腿式机器人 sim2sim 时序图、OSMO 部署架构图、工作流时序图 |
+| [docs/images/](docs/images/) | Azure 部署架构图（含外部算力）、OSMO + AzureML 闭环时序图、混合云训练与验证时序图、OSMO 部署架构图、工作流时序图 |
 | [infra/terraform/](infra/terraform/README.zh-CN.md) | Azure 基础设施：AKS（系统池、CPU 池、T4 Spot GPU 池）、私网数据组件、固定入口 IP、AzureML 工作区和机器人数据湖 |
 | [deploy/](deploy/README.zh-CN.md) | OSMO 6.3.1 部署（GPU Operator、KAI、OSMO service、backend operator、Traefik、Keycloak）、验收检查与仿真示例 |
 
@@ -48,7 +49,11 @@ _连线说明：绿色 = 私网（VNet / Private Link）· 橙色虚线 = 公网
   - OSMO 负责执行，AzureML 负责记录实验（MLflow）、模型和数据资产。
   - 一个 OSMO 工作流完成：T4 上用 Isaac Lab 训练策略 → 在 AzureML 注册模型 → 在 MuJoCo 和 Gazebo 中做 sim2sim 验证，按成功率门禁给模型版本打上 passed / failed 标签。
   - 数据来自私网 ADLS Gen2 数据湖，注册为 AzureML 数据资产；全部使用 Workload Identity 访问。
-- **腿式机器人 sim2sim 大规模验证**（[docs/legged-sim2sim.md](docs/legged-sim2sim.md)）：
+- **混合云算力：其他云和本地机房，结果集中在 Azure**（[docs/hybrid-robot-pipeline.md](docs/hybrid-robot-pipeline.md)、[docs/private-storage-security.md](docs/private-storage-security.md)）：
+  - 外部 Kubernetes 集群（模拟：另一区域和网络中的 k3s、H100 服务器上的 k3s）作为资源池接入 OSMO，只发起出站 HTTPS 连接：不开放入站端口，不需要 VPN 或网络互联。
+  - 存储始终只走私网。外部作业经公网入口上的 SNI 透传存储网关访问（TLS 端到端、出口 IP 白名单），通过工作负载身份联合使用 OSMO 托管身份，不使用任何密钥。
+  - 流水线：本地 H100 上用 Isaac Lab 训练 → AzureML 模型注册表 → 验证分片分散到三个资源池 → 结果汇总到 Azure 数据湖 → 在 AzureML 中门禁和晋级。
+- **腿式机器人 sim2sim 大规模验证**（[docs/hybrid-robot-pipeline.md](docs/hybrid-robot-pipeline.md)）：
   - 替代手柄驱动的手工 sim2sim：两套点足双足机器人预训练策略在 MuJoCo 中跑 1000–1200 个场景（速度指令 × 摩擦 × 负载 × 推力 × 延迟），切成 10 个 OSMO 任务并行。
   - 第二个仿真器直接运行厂商自己的 ROS 2 部署栈（Gazebo Classic + ros2_control + C++ RL 控制器），跑一个场景子集；镜像在集群内构建，存放在私有 ACR；模型必须在两个仿真器中都通过。
   - 按摔倒率和速度跟踪做门禁，决定哪个版本晋级 `stage=production`（冠军 / 挑战者）；场景集升级后对所有已注册模型重新验证。

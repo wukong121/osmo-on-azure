@@ -133,3 +133,16 @@ output "acr_name" {
 output "acr_login_server" {
   value = var.acr_enabled ? azurerm_container_registry.main[0].login_server : ""
 }
+
+output "external_k3s_public_ip" {
+  value = var.external_backends_enabled ? azurerm_public_ip.ext[0].ip_address : ""
+}
+
+output "external_k3s_vm_name" {
+  value = var.external_backends_enabled ? azurerm_linux_virtual_machine.ext[0].name : ""
+}
+
+output "external_access_cidrs" {
+  description = "外部集群出口 IP（ACR 白名单、存储网关白名单）"
+  value       = local.ext_cidrs
+}

@@ -26,11 +26,9 @@ resource "azapi_resource" "storage" {
       defaultToOAuthAuthentication = true
       minimumTlsVersion            = "TLS1_2"
       supportsHttpsTrafficOnly     = true
-      publicNetworkAccess          = "Disabled"
-      networkAcls = {
-        defaultAction = "Deny"
-        bypass        = "AzureServices"
-      }
+      # 默认仅私网；启用外部计算后端后按 IP 白名单开放（见 external.tf）
+      publicNetworkAccess = local.storage_network_properties.publicNetworkAccess
+      networkAcls         = local.storage_network_properties.networkAcls
     }
   }
 

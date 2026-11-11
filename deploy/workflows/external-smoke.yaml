@@ -1,0 +1,60 @@
+# Smoke test for an external compute backend (scripts/09-external-backend.sh). Submit to its pool:
+#   osmo workflow submit external-smoke.yaml --pool <pool> \
+#     --set-string aml_subscription_id=... aml_resource_group=... aml_workspace=...
+#
+# Checks, from a pod in the external cluster:
+#   1. Workload Identity federation: the pod's service-account token (issued by the external
+#      cluster) is exchanged for an Entra ID token of the OSMO managed identity - no keys
+#   2. AzureML: list the workspace's datastores with that identity
+#   3. Private data lake through the storage gateway: list the robotics data container
+#   4. Task output upload to the OSMO Blob container (private, through the gateway)
+workflow:
+  name: external-smoke
+  timeout:
+    exec_timeout: 20m
+    queue_timeout: 20m
+  resources:
+    cpu1:
+      cpu: 1
+      memory: 2Gi
+      storage: 2Gi
+  tasks:
+  - name: check
+    image: python:3.12-slim
+    resource: cpu1
+    environment:
+      AML_SUBSCRIPTION_ID: "{{aml_subscription_id}}"
+      AML_RESOURCE_GROUP: "{{aml_resource_group}}"
+      AML_WORKSPACE: "{{aml_workspace}}"
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -euo pipefail
+      pip install --quiet --no-cache-dir azure-identity==1.27.0 azure-ai-ml==1.35.2 azure-storage-blob==12.27.1
+      python - <<'PY'
+      import os, socket, time
+      from azure.identity import DefaultAzureCredential
+      from azure.ai.ml import MLClient
+      from azure.storage.blob import ContainerClient
+      print("node:", os.environ.get("HOSTNAME"), "| token file:", os.environ.get("AZURE_FEDERATED_TOKEN_FILE"))
+      cred = DefaultAzureCredential(exclude_interactive_browser_credential=True)
+      t0 = time.time(); cred.get_token("https://management.azure.com/.default")
+      print(f"1. Entra ID token via federation: ok ({time.time() - t0:.1f}s)")
+      ml = MLClient(cred, os.environ["AML_SUBSCRIPTION_ID"], os.environ["AML_RESOURCE_GROUP"], os.environ["AML_WORKSPACE"])
+      stores = [d.name for d in ml.datastores.list()]
+      print("2. AzureML datastores:", ", ".join(sorted(stores)))
+      ds = ml.datastores.get("robotics_data")
+      host = f"{ds.account_name}.blob.{ds.endpoint}"
+      ip = socket.gethostbyname(host)
+      print(f"   data lake {host} -> {ip} ({'private endpoint' if ip.startswith('10.') else 'storage gateway'})")
+      cc = ContainerClient(f"https://{host}", ds.filesystem, credential=cred)
+      names = [b.name for b in cc.list_blobs(name_starts_with="legged/")][:3]
+      print("3. data lake listing:", names)
+      PY
+      mkdir -p {{output}} && echo "written on $(hostname) at $(date -u)" > {{output}}/hello.txt
+      echo "4. output written; osmo-ctrl uploads it to the OSMO Blob container"
+
+default-values:
+  aml_subscription_id: ""
+  aml_resource_group: ""
+  aml_workspace: ""

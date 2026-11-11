@@ -18,7 +18,8 @@
 | Keycloak（浏览器登录，可选） | Keycloak Operator 26.8.2（官方清单） | `keycloak` | OIDC 身份提供方，地址 `https://<域名>/auth`，realm 为 `osmo`。组 `osmo-admins` / `osmo-users` 通过 token 中的 `roles` 声明映射为 OSMO 角色。数据库为现有 PostgreSQL 上的 `keycloak` 库（专用账号，TLS 连接） |
 | workflow-data SAS 轮换器 | [manifests/workflow-data-sas-rotator.yaml](manifests/workflow-data-sas-rotator.yaml) | `osmo` | 绕过 OSMO 6.3.1 bug 的 CronJob（原因见下文），升级到 OSMO 6.4 后删除 |
 | AzureML 闭环（可选） | [workflows/rl-train-validate.yaml](workflows/rl-train-validate.yaml)、[workflows/azureml-seed-data.yaml](workflows/azureml-seed-data.yaml) | `osmo-workflows` | 普通的 OSMO 工作流，用 Workload Identity 调用 AzureML（MLflow、模型注册表、数据资产），集群里不安装任何组件。见 [docs/azureml-loop.md](../docs/azureml-loop.md) |
-| 腿式机器人 sim2sim 大规模验证（可选） | [workflows/legged-seed.yaml](workflows/legged-seed.yaml)、[workflows/legged-validate.yaml](workflows/legged-validate.yaml)、[workflows/build-image.yaml](workflows/build-image.yaml)、[images/legged-gazebo-ros2/](images/legged-gazebo-ros2/Dockerfile) | `osmo-workflows` | 点足双足机器人策略在 MuJoCo 和 Gazebo Classic（厂商的 ROS 2 部署栈）中分多个 CPU 任务并行验证，在 AzureML 模型注册表中门禁和晋级。Gazebo 镜像在集群内用 kaniko 构建并推到私有 ACR；`02-osmo-service.sh` 会把 ACR 加入 OSMO 的 `disable_registry_validation`。机器人和策略的来源写在 `scripts/legged.env`（模板见 `legged.env.example`）。见 [docs/legged-sim2sim.md](../docs/legged-sim2sim.md) |
+| 腿式机器人 sim2sim 大规模验证（可选） | [workflows/legged-seed.yaml](workflows/legged-seed.yaml)、[workflows/legged-validate.yaml](workflows/legged-validate.yaml)、[workflows/build-image.yaml](workflows/build-image.yaml)、[images/legged-gazebo-ros2/](images/legged-gazebo-ros2/Dockerfile) | `osmo-workflows` | 点足双足机器人策略在 MuJoCo 和 Gazebo Classic（厂商的 ROS 2 部署栈）中分多个 CPU 任务并行验证，在 AzureML 模型注册表中门禁和晋级。Gazebo 镜像在集群内用 kaniko 构建并推到私有 ACR；`02-osmo-service.sh` 会把 ACR 加入 OSMO 的 `disable_registry_validation`。机器人和策略的来源写在 `scripts/legged.env`（模板见 `legged.env.example`）。见 [docs/hybrid-robot-pipeline.md](../docs/hybrid-robot-pipeline.md) |
+| 外部计算后端（可选） | [scripts/09-external-backend.sh](scripts/09-external-backend.sh)、[scripts/external/k3s-node.sh](scripts/external/k3s-node.sh)、[values/osmo-service-external.yaml](values/osmo-service-external.yaml)、[workflows/external-smoke.yaml](workflows/external-smoke.yaml) | 外部集群、`osmo` | 其他云或本地机房的 Kubernetes 集群（k3s）作为 OSMO 资源池接入，只需出站 HTTPS。AKS 侧：公网入口上的 SNI 透传存储网关（只放行外部出口 IP）和外部集群服务账号签发方的 OIDC 文档。每个外部集群：KAI、Azure Workload Identity webhook（联合到 OSMO 托管身份）、指向网关的 DNS 覆盖、backend operator。见 [docs/hybrid-robot-pipeline.md](../docs/hybrid-robot-pipeline.md) 和 [docs/private-storage-security.md](../docs/private-storage-security.md) |
 
 ## 第一阶段设计
 
@@ -73,6 +74,8 @@ OSMO_HOSTNAME=osmo.example.com KEYCLOAK_ADMINS="alice@example.com" KEYCLOAK_USER
 # 可选：AzureML 闭环（需先 apply infra/terraform/azureml.tf）
 deploy/scripts/07-azureml-loop.sh       # 准备数据资产，然后 训练（T4）→ 注册 → sim2sim 验证（MuJoCo + Gazebo）→ 门禁
 deploy/scripts/08-legged-sim2sim.sh image seed import validate   # 腿式机器人：Gazebo 镜像、场景集 + 策略，然后分片 MuJoCo + Gazebo 验证 → 门禁
+deploy/scripts/09-external-backend.sh gateway; deploy/scripts/09-external-backend.sh join <名称> <kubeconfig> [--gpu]   # 外部算力（先在外部机器上运行 scripts/external/k3s-node.sh）
+deploy/scripts/08-legged-sim2sim.sh train campaign   # 在本地 GPU 资源池上训练，再跨资源池混合验证 → 在 Azure 上门禁
 
 # 集群被停止后恢复（例如每晚的自动停机）
 deploy/scripts/00-resume.sh
@@ -129,7 +132,7 @@ osmo workflow logs <workflow-id>
 | `mujoco`（可选） | [mujoco-sim.yaml](workflows/mujoco-sim.yaml) | 在 CPU 平台（`npcpu`）上运行 MuJoCo 3.17 headless 仿真：双摆加若干下落的盒子，仿真时长 10 秒。校验盒子最终静止在地面上，并上传 `trajectory.csv` 和 `summary.txt` | ✅（2026-11-06） |
 | `gazebo`（可选） | [gazebo-sim.yaml](workflows/gazebo-sim.yaml) | 在 `npcpu` 上以 headless server 模式运行 Gazebo Harmonic（gz-sim 8.11，镜像 `osrf/ros:jazzy-simulation`），执行 [files/falling_shapes.sdf](workflows/files/falling_shapes.sdf) 50,000 次迭代，耗时约 11 秒，并上传录制的 `state.tlog` | ✅（2026-11-06） |
 | `07-azureml-loop.sh`（可选） | [rl-train-validate.yaml](workflows/rl-train-validate.yaml) | 数据湖 → AzureML 数据资产；T4 上 Isaac Lab 训练并导出 ONNX；在 AzureML 中记录 MLflow 运行并注册模型；在 MuJoCo 和 Gazebo Harmonic 中并行对 ONNX 策略做 sim2sim 验证（各 100 个场景），由门禁任务记录两边结果并给模型版本打 passed / failed 标签 | ✅（2026-11-09）：两个仿真器均 100/100 回合通过；欠训练（5 次迭代）的策略被门禁拦下 |
-| `08-legged-sim2sim.sh`（可选） | [legged-validate.yaml](workflows/legged-validate.yaml) | 场景集（1000 / 1200 个：速度指令 × 摩擦 × 负载 × 推力 × 延迟）和预训练点足策略登记到 AzureML；CPU 池上 10 个 MuJoCo 分片并行；按分布内摔倒率和速度 RMSE 门禁，冠军 / 挑战者晋级 | ✅（2026-11-10）：晋级、门禁拦截、场景集升级后重新验证均已跑通，见 [docs/legged-sim2sim.md](../docs/legged-sim2sim.md) |
+| `08-legged-sim2sim.sh`（可选） | [legged-validate.yaml](workflows/legged-validate.yaml) | 场景集（1000 / 1200 个：速度指令 × 摩擦 × 负载 × 推力 × 延迟）和预训练点足策略登记到 AzureML；CPU 池上 10 个 MuJoCo 分片并行；按分布内摔倒率和速度 RMSE 门禁，冠军 / 挑战者晋级 | ✅（2026-11-10）：晋级、门禁拦截、场景集升级后重新验证均已跑通，见 [docs/hybrid-robot-pipeline.md](../docs/hybrid-robot-pipeline.md) |
 
 只跑其中几项：`deploy/scripts/04-verify.sh hello storage`；只跑仿真示例：`deploy/scripts/04-verify.sh isaaclab mujoco gazebo`。
 

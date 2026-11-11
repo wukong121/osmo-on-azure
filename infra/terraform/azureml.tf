@@ -34,11 +34,9 @@ locals {
     defaultToOAuthAuthentication = true
     minimumTlsVersion            = "TLS1_2"
     supportsHttpsTrafficOnly     = true
-    publicNetworkAccess          = "Disabled"
-    networkAcls = {
-      defaultAction = "Deny"
-      bypass        = "AzureServices"
-    }
+    # 默认仅私网；启用外部计算后端后按 IP 白名单开放（见 external.tf）
+    publicNetworkAccess = local.storage_network_properties.publicNetworkAccess
+    networkAcls         = local.storage_network_properties.networkAcls
   }
 
   # 私有终结点：键 => 目标资源、子资源、DNS 区域、名称

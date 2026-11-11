@@ -2,6 +2,7 @@
 
   seed     Upload the robot model (MJCF + meshes) and a generated scenario set to the data lake
            and register the AzureML data asset <name>:<version>.
+  register-trained  Register a policy trained by legged-train.yaml (TensorBoard -> MLflow run).
   import   Register exported policies (policy.onnx + encoder.onnx + params.yaml per rl_type) as
            versions of one AzureML model. The files are logged as MLflow run artifacts, so each
            version points back to its import run (and later validation runs nest under it).
@@ -90,6 +91,71 @@ def import_policies(a: argparse.Namespace) -> None:
         print(f"registered {model.name}:{model.version} ({rl_type}, run {run_id})")
 
 
+def register_trained(a: argparse.Namespace) -> None:
+    """Register a policy trained by legged-train.yaml: TensorBoard -> MLflow run, ONNX -> model."""
+    from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+
+    client = ml_client()
+    mlflow = setup_mlflow(client, a.experiment)
+    run_dir = Path(a.run_dir)
+    exported = run_dir / "exported"
+    ckpts = sorted(run_dir.glob("model_*.pt"), key=lambda p: int(p.stem.split("_")[1]))
+    commit = (run_dir / "source_commit").read_text().strip() if (run_dir / "source_commit").exists() else ""
+    tags = {**workflow_tags(), "stage": "training", "source": "trained", "rl_type": "isaaclab",
+            "robot": a.robot_type, "task": a.task, "source_repo": a.source_repo, "source_commit": commit,
+            "trainer": "isaaclab-2.1 (isaac sim 4.5) + rsl_rl", "compute_pool": a.pool}
+    with mlflow.start_run(run_name=f"train-{a.robot_type}-{run_dir.name}", tags=tags) as run:
+        acc = EventAccumulator(str(run_dir), size_guidance={"scalars": 0})
+        acc.Reload()
+        import time
+
+        from mlflow.entities import Metric
+        # At most ~200 points per curve (plenty for the charts) and paced batches: AzureML's MLflow
+        # endpoint throttles (HTTP 429) bulk writes, and the run may be far from the workspace
+        points = []
+        for tag in acc.Tags().get("scalars", []):
+            events = acc.Scalars(tag)
+            stride = max(1, len(events) // 200)
+            points += [Metric(tag.replace("/", ".").replace(" ", "_"), float(ev.value), int(ev.wall_time * 1000), ev.step)
+                       for ev in events[::stride] + ([events[-1]] if (len(events) - 1) % stride else [])]
+        mc = mlflow.tracking.MlflowClient()
+        for i in range(0, len(points), 500):
+            for attempt in range(6):
+                try:
+                    mc.log_batch(run.info.run_id, metrics=points[i:i + 500])
+                    break
+                except Exception as e:  # noqa: BLE001 - retry throttling with backoff
+                    if attempt == 5 or "429" not in str(e):
+                        raise
+                    time.sleep(10 * (attempt + 1))
+            time.sleep(1)
+        n = len(points)
+        print(f"logged {n} metric points from {len(acc.Tags().get('scalars', []))} TensorBoard tags")
+        mlflow.log_params({"iterations": int(ckpts[-1].stem.split("_")[1]) if ckpts else 0, "task": a.task})
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "model"
+            d.mkdir()
+            for f in ("policy.onnx", "encoder.onnx"):
+                shutil.copy2(exported / f, d / f)
+            shutil.copy2(a.params, d / "params.yaml")
+            if ckpts:
+                shutil.copy2(ckpts[-1], d / ckpts[-1].name)
+            (d / "policy.json").write_text(json.dumps({"rl_type": "isaaclab", "robot": a.robot_type, "interface": "pointfoot-rsl-rl-encoder"}))
+            mlflow.log_artifacts(str(d), artifact_path="model")
+        run_id = run.info.run_id
+    model = client.models.create_or_update(Model(
+        name=a.model_name,
+        path=f"azureml://jobs/{run_id}/outputs/artifacts/paths/model/",
+        type=AssetTypes.CUSTOM_MODEL,
+        description=f"{a.robot_type} locomotion policy trained on OSMO pool {a.pool} (ONNX policy + encoder)",
+        tags={k: v for k, v in tags.items() if k != "stage"} | {"format": "onnx", "sim2sim_validation": "pending"},
+    ))
+    print(f"registered {model.name}:{model.version} (run {run_id})")
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "model.json").write_text(json.dumps({"name": model.name, "version": model.version, "run_id": run_id}, indent=2))
+
+
 def fetch(a: argparse.Namespace) -> None:
     import mlflow
 
@@ -147,6 +213,17 @@ def main() -> None:
     s.add_argument("--source-repo", default="")
     s.add_argument("--source-commit", default="")
     s.set_defaults(func=import_policies)
+    s = sub.add_parser("register-trained")
+    s.add_argument("--run-dir", required=True, help="rsl_rl run folder with model_*.pt, TensorBoard events, exported/")
+    s.add_argument("--params", required=True, help="deployment params.yaml for the policy interface")
+    s.add_argument("--robot-type", required=True)
+    s.add_argument("--task", default="")
+    s.add_argument("--model-name", default="pointfoot-policy")
+    s.add_argument("--experiment", default="pointfoot-sim2sim")
+    s.add_argument("--source-repo", default="")
+    s.add_argument("--pool", default="")
+    s.add_argument("--out", required=True)
+    s.set_defaults(func=register_trained)
     s = sub.add_parser("fetch")
     s.add_argument("--models", required=True, help="name:version (candidate + champion) or name:all")
     s.add_argument("--dataset", required=True, help="data asset name or name:version")
