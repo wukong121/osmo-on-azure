@@ -50,6 +50,17 @@ fi
 
 endpoint="azure://${STORAGE_ACCOUNT}/${STORAGE_CONTAINER}"
 
+# Private ACR (optional, infra/terraform/acr.tf): AKS pulls with its kubelet identity (AcrPull).
+# OSMO checks at submit time that it can read the image manifest, which it cannot do for a
+# private registry without stored credentials; skip that check for our registry instead of
+# storing a password in OSMO.
+acr_values=()
+ACR_HOST="$(tf_out acr_login_server 2>/dev/null || true)"
+if [[ -n "$ACR_HOST" ]]; then
+  acr_values=(--set-json "services.configs.workflow.credential_config.disable_registry_validation=[\"$ACR_HOST\"]")
+  info "Private registry $ACR_HOST: image pulls via the AKS kubelet identity"
+fi
+
 # Optional browser login: Keycloak (values/osmo-service-keycloak.yaml, set up by 06-keycloak-login.sh)
 # or Entra ID (values/osmo-service-entra.yaml). Without either, OSMO is token-only (CLI).
 extra_values=()
@@ -83,7 +94,7 @@ helm upgrade --install osmo osmo/service \
   --version "$OSMO_CHART_VERSION" \
   --namespace "$NS_OSMO" \
   -f "$VALUES_DIR/osmo-service.yaml" \
-  "${extra_values[@]}" \
+  "${extra_values[@]}" "${acr_values[@]}" \
   --set-string "serviceAccount.annotations.azure\.workload\.identity/client-id=$OSMO_CLIENT_ID" \
   --set-string "services.postgres.serviceName=$PG_FQDN" \
   --set-string "services.postgres.user=$PG_USER" \

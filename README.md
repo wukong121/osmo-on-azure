@@ -17,7 +17,7 @@ _Edges: green = private (VNet / Private Link) · orange dashed = public entry (A
 | [docs/reference-repos.md](docs/reference-repos.md) (Chinese) | Review of the reference repos (NVIDIA/OSMO, microsoft/physical-ai-toolchain): version choice, PostgreSQL TLS, reusable parts |
 | [docs/operations-guide.md](docs/operations-guide.md) (Chinese) | Operations guide: resume the environment, log in, view workflow history and logs, check resources, cost control, troubleshooting |
 | [docs/azureml-loop.md](docs/azureml-loop.md) (Chinese) | OSMO + AzureML closed loop: data lake → Isaac Lab training on T4 → MLflow tracking and model registry → sim2sim validation in MuJoCo and Gazebo |
-| [docs/legged-sim2sim.md](docs/legged-sim2sim.md) (Chinese) | Sim2sim validation at scale for a point-foot biped: 1000+ scenarios sharded across the CPU pool, gate on fall rate and velocity tracking, champion/challenger promotion in the AzureML model registry |
+| [docs/legged-sim2sim.md](docs/legged-sim2sim.md) (Chinese) | Sim2sim validation at scale for a point-foot biped in MuJoCo and Gazebo (vendor ROS 2 stack): scenarios sharded across the CPU pool, gate on fall rate and velocity tracking, champion/challenger promotion in the AzureML model registry |
 | [docs/t4-feasibility.md](docs/t4-feasibility.md) (Chinese) | Feasibility of running Isaac Lab / Isaac Sim / MuJoCo / Gazebo on T4 GPUs |
 | [docs/images/](docs/images/) | Azure architecture, OSMO + AzureML closed-loop sequence, legged sim2sim sequence, OSMO deployment architecture, OSMO workflow sequence |
 | [infra/terraform/](infra/terraform/README.md) | Azure infrastructure: AKS (system, CPU and T4 Spot GPU pools), private data services, static ingress IP, AzureML workspace and robotics data lake |
@@ -50,5 +50,6 @@ _Edges: green = private (VNet / Private Link) · orange dashed = public entry (A
   - Data comes from a private ADLS Gen2 data lake registered as an AzureML data asset. All access uses Workload Identity.
 - **Legged robot sim2sim at scale** ([docs/legged-sim2sim.md](docs/legged-sim2sim.md)):
   - Replaces manual, joystick-driven sim2sim checks: two pretrained point-foot biped policies run through 1000–1200 MuJoCo scenarios (velocity commands × friction × payload × push × latency) in 10 parallel OSMO tasks.
+  - A second simulator runs the vendor's own ROS 2 deployment stack (Gazebo Classic + ros2_control + C++ RL controller) on a scenario subset, from an image built in the cluster and stored in a private ACR; a model must pass in both simulators.
   - A gate on fall rate and velocity tracking decides which version becomes `stage=production` (champion/challenger), and a new scenario-set version re-validates every registered model.
 - **Known limitations**: see [deploy/README.md](deploy/README.md#known-limitations-phase-1). For example, the workflow-data SAS workaround stays in place until OSMO 6.4, and the subscription shuts the environment down every night.

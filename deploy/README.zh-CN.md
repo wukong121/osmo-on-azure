@@ -18,7 +18,7 @@
 | Keycloak（浏览器登录，可选） | Keycloak Operator 26.8.2（官方清单） | `keycloak` | OIDC 身份提供方，地址 `https://<域名>/auth`，realm 为 `osmo`。组 `osmo-admins` / `osmo-users` 通过 token 中的 `roles` 声明映射为 OSMO 角色。数据库为现有 PostgreSQL 上的 `keycloak` 库（专用账号，TLS 连接） |
 | workflow-data SAS 轮换器 | [manifests/workflow-data-sas-rotator.yaml](manifests/workflow-data-sas-rotator.yaml) | `osmo` | 绕过 OSMO 6.3.1 bug 的 CronJob（原因见下文），升级到 OSMO 6.4 后删除 |
 | AzureML 闭环（可选） | [workflows/rl-train-validate.yaml](workflows/rl-train-validate.yaml)、[workflows/azureml-seed-data.yaml](workflows/azureml-seed-data.yaml) | `osmo-workflows` | 普通的 OSMO 工作流，用 Workload Identity 调用 AzureML（MLflow、模型注册表、数据资产），集群里不安装任何组件。见 [docs/azureml-loop.md](../docs/azureml-loop.md) |
-| 腿式机器人 sim2sim 大规模验证（可选） | [workflows/legged-seed.yaml](workflows/legged-seed.yaml)、[workflows/legged-validate.yaml](workflows/legged-validate.yaml) | `osmo-workflows` | 点足双足机器人策略在 MuJoCo 中分 N 个 CPU 任务并行验证，在 AzureML 模型注册表中门禁和晋级。机器人和策略的来源写在 `scripts/legged.env`（模板见 `legged.env.example`）。见 [docs/legged-sim2sim.md](../docs/legged-sim2sim.md) |
+| 腿式机器人 sim2sim 大规模验证（可选） | [workflows/legged-seed.yaml](workflows/legged-seed.yaml)、[workflows/legged-validate.yaml](workflows/legged-validate.yaml)、[workflows/build-image.yaml](workflows/build-image.yaml)、[images/legged-gazebo-ros2/](images/legged-gazebo-ros2/Dockerfile) | `osmo-workflows` | 点足双足机器人策略在 MuJoCo 和 Gazebo Classic（厂商的 ROS 2 部署栈）中分多个 CPU 任务并行验证，在 AzureML 模型注册表中门禁和晋级。Gazebo 镜像在集群内用 kaniko 构建并推到私有 ACR；`02-osmo-service.sh` 会把 ACR 加入 OSMO 的 `disable_registry_validation`。机器人和策略的来源写在 `scripts/legged.env`（模板见 `legged.env.example`）。见 [docs/legged-sim2sim.md](../docs/legged-sim2sim.md) |
 
 ## 第一阶段设计
 
@@ -72,7 +72,7 @@ OSMO_HOSTNAME=osmo.example.com KEYCLOAK_ADMINS="alice@example.com" KEYCLOAK_USER
 
 # 可选：AzureML 闭环（需先 apply infra/terraform/azureml.tf）
 deploy/scripts/07-azureml-loop.sh       # 准备数据资产，然后 训练（T4）→ 注册 → sim2sim 验证（MuJoCo + Gazebo）→ 门禁
-deploy/scripts/08-legged-sim2sim.sh seed import validate   # 腿式机器人：场景集 + 策略，然后分片 MuJoCo 验证 → 门禁
+deploy/scripts/08-legged-sim2sim.sh image seed import validate   # 腿式机器人：Gazebo 镜像、场景集 + 策略，然后分片 MuJoCo + Gazebo 验证 → 门禁
 
 # 集群被停止后恢复（例如每晚的自动停机）
 deploy/scripts/00-resume.sh

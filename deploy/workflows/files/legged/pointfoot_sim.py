@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import collections
 import math
-from dataclasses import dataclass, field
 
 import mujoco
 import numpy as np
@@ -30,15 +29,11 @@ import onnxruntime as ort
 import yaml
 from scipy.spatial.transform import Rotation as R
 
+from episode_metrics import WARMUP_S, EpisodeResult, command_at, is_fallen, score, yaw_from_quat_xyzw
+
 LAB_ORDER = [0, 3, 1, 4, 2, 5]  # robot order (L abad, hip, knee, R abad, hip, knee) -> Isaac Lab order
 
 PHYSICS_HZ = 1000
-FALL_HEIGHT = 0.45   # base height [m] below which the robot is considered fallen
-FALL_TILT = 1.0      # base tilt [rad] above which the robot is considered fallen
-SETTLE_S = 1.0       # ignore tracking error right after reset
-CMD_SETTLE_S = 0.5   # ... after each command change
-PUSH_SETTLE_S = 1.5  # ... after a push starts
-SMOOTH_S = 0.5       # moving-average window for base velocity (one gait cycle at 2 Hz)
 
 
 def _to_lab(a: np.ndarray) -> np.ndarray:
@@ -163,30 +158,12 @@ class PointfootSim:
         return False
 
 
-@dataclass
-class EpisodeResult:
-    fell: bool
-    fall_time: float | None
-    survival: float          # fraction of the episode before a fall (1.0 if no fall)
-    lin_vel_rmse: float      # m/s, smoothed base xy velocity (heading frame) vs command
-    yaw_rate_rmse: float     # rad/s
-    distance: float          # m, base xy displacement
-    extra: dict = field(default_factory=dict)
-
-
-def _command_at(commands, t):
-    cmd = [0.0, 0.0, 0.0]
-    for seg in commands:
-        if seg[0] <= t:
-            cmd = seg[1:4]
-    return np.asarray(cmd, dtype=float)
-
-
 def rollout(sim: PointfootSim, pol: Policy, sc: dict, on_step=None, stop_on_fall: bool = True) -> EpisodeResult:
     """Run one scenario:
       duration [s]; commands [[t, vx, vy, wz], ...]; friction; added_mass [kg];
       push {t, fx, fy, dur} [s, N]; latency_ms (observation delay, 2 ms resolution).
-    Starts under policy control right after reset (a point foot cannot stand still).
+    Starts under policy control right after reset (a point foot cannot stand still), with a
+    WARMUP_S zero-command warm-up; scenario time 0 is the end of the warm-up.
     on_step(t, fell) is called after every controller step (e.g. to render frames);
     stop_on_fall=False keeps simulating after a fall (metrics still cover the time before it).
     """
@@ -194,24 +171,26 @@ def rollout(sim: PointfootSim, pol: Policy, sc: dict, on_step=None, stop_on_fall
     sim.reset()
     pol.reset()
     phys_per_ctrl = PHYSICS_HZ // pol.loop_hz
-    n_ctrl = int(round(sc["duration"] * pol.loop_hz))
+    n_ctrl = int(round((WARMUP_S + sc["duration"]) * pol.loop_hz))
     delay = int(round(sc.get("latency_ms", 0.0) * pol.loop_hz / 1000.0))
     obs_buf = collections.deque(maxlen=delay + 1)
     push = sc.get("push")
     commands = sorted(sc["commands"])
-    change_times = [c[0] for c in commands]
 
     t_log, v_log, wz_log, cmd_log = [], [], [], []
-    start_xy = sim.d.qpos[0:2].copy()
+    start_xy = None
     fell, t_fall = False, None
     for k in range(n_ctrl):
-        t = k / pol.loop_hz
+        t = k / pol.loop_hz - WARMUP_S  # scenario time; negative during the warm-up
         state = sim.sense()
         obs_buf.append(state)
+        if t >= 0 and start_xy is None:
+            start_xy = sim.d.qpos[0:2].copy()
         if k % pol.decimation == 0:
-            cmd = _command_at(commands, t)
+            cmd = command_at(commands, t) if t >= 0 else np.zeros(3)
             pol.step(*obs_buf[0], cmd)
-            yaw = R.from_quat(state[0]).as_euler("zyx")[0]
+        if k % pol.decimation == 0 and t >= 0:
+            yaw = yaw_from_quat_xyzw(state[0])
             c, s = math.cos(yaw), math.sin(yaw)
             vx, vy = sim.d.qvel[0], sim.d.qvel[1]
             t_log.append(t)
@@ -224,44 +203,12 @@ def rollout(sim: PointfootSim, pol: Policy, sc: dict, on_step=None, stop_on_fall
         else:
             sim.d.xfrc_applied[sim.base, :] = 0.0
         sim.step(q_des, pol.kp, pol.kd, phys_per_ctrl)
-        tilt = math.acos(max(-1.0, min(1.0, -R.from_quat(sim.sense()[0]).inv().apply([0, 0, -1.0])[2])))
-        if not fell and (sim.d.qpos[2] < FALL_HEIGHT or tilt > FALL_TILT or sim.base_contact()):
-            fell, t_fall = True, t
+        if not fell and is_fallen(sim.d.qpos[2], sim.sense()[0], sim.base_contact()):
+            fell, t_fall = True, max(0.0, t)
         if on_step is not None:
             on_step(t, fell)
         if fell and stop_on_fall:
             break
 
-    t_arr = np.array(t_log)
-    v = np.array(v_log)
-    wz = np.array(wz_log)
-    cmd = np.array(cmd_log)
-    win = max(1, int(round(SMOOTH_S / pol.policy_dt)))
-    kernel = np.ones(win) / win
-    if len(t_arr) >= win:
-        sv = np.stack([np.convolve(v[:, i], kernel, mode="valid") for i in range(2)], axis=1)
-        swz = np.convolve(wz, kernel, mode="valid")
-        st = t_arr[win - 1:]
-        scmd = cmd[win - 1:]
-        mask = st >= SETTLE_S
-        for tc in change_times:
-            mask &= ~((st >= tc) & (st < tc + CMD_SETTLE_S))
-        if push:
-            mask &= ~((st >= push["t"]) & (st < push["t"] + PUSH_SETTLE_S))
-        if fell:
-            mask &= st < t_fall - 0.5
-    else:
-        mask = np.zeros(0, dtype=bool)
-    if mask.any():
-        lin = float(np.sqrt(np.mean(np.sum((sv[mask] - scmd[mask, :2]) ** 2, axis=1))))
-        yaw_rmse = float(np.sqrt(np.mean((swz[mask] - scmd[mask, 2]) ** 2)))
-    else:
-        lin, yaw_rmse = float("nan"), float("nan")
-    return EpisodeResult(
-        fell=fell,
-        fall_time=t_fall,
-        survival=(t_fall / sc["duration"]) if fell else 1.0,
-        lin_vel_rmse=lin,
-        yaw_rate_rmse=yaw_rmse,
-        distance=float(np.linalg.norm(sim.d.qpos[0:2] - start_xy)),
-    )
+    distance = 0.0 if start_xy is None else float(np.linalg.norm(sim.d.qpos[0:2] - start_xy))
+    return score(sc, t_log, v_log, wz_log, cmd_log, pol.policy_dt, fell, t_fall, distance)

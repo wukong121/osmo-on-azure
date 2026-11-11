@@ -1,19 +1,23 @@
 """Sim2sim gate for point-foot locomotion policies: merge shards, score, record, promote.
 
 Inputs: models.json from the fetch task (models under test, their roles and MLflow run IDs),
-data_asset.json, and the output folders of every validation shard (episodes.csv + shard.json).
+data_asset.json, and the output folders of every validation shard (episodes.csv + shard.json)
+from one or more simulators (MuJoCo shards, Gazebo shards).
 
-Per model version it computes, on the in-distribution scenarios (the gate set):
+Per model version and simulator it computes, on the in-distribution scenarios (the gate set):
   fall_rate          share of episodes in which the robot fell
   lin_vel_rmse       velocity-tracking RMSE [m/s] over the episodes without a fall
   yaw_rate_rmse      yaw-rate tracking RMSE [rad/s] (reported, not gated)
 and fall rates per stress factor (friction, payload, push, latency, compound), in and out of
 distribution, for diagnosis. Out-of-distribution scenarios are reported but never gated.
+Invalid episodes (Gazebo: real-time factor too low, or no clean start after retries) are
+excluded and counted.
 
-It logs one MLflow run per model version (child of the run that holds the model files), tags
-the model versions, and then, depending on --mode:
+A model passes when it passes in every simulator. It logs one MLflow run per model version and
+simulator (child of the run that holds the model files), tags the model versions, and then,
+depending on --mode:
   promote     the "candidate" must pass the gate and must not be worse than the current
-              "champion" (stage=production) on the same scenarios; if so it becomes
+              "champion" (stage=production) in any simulator; if so it becomes
               stage=production and the champion stage=archived. Exit 1 if the candidate fails
               the gate.
   revalidate  re-score every listed version on (new) data; no promotion. Exit 1 if the current
@@ -84,20 +88,25 @@ def summarize(rows: list[dict]) -> dict:
 
 
 BINS_KEY = {"friction": "friction", "added_mass": "added_mass", "push": "push_force", "latency_ms": "latency_ms"}
+NUMERIC = ("friction", "added_mass", "push_force", "latency_ms", "survival", "lin_vel_rmse", "yaw_rate_rmse", "distance")
 
 
-def load_rows(shard_dirs: list[str]) -> tuple[list[dict], int]:
-    rows, scenarios = [], 0
+def load_rows(shard_dirs: list[str]) -> tuple[list[dict], dict[str, int]]:
+    """All episode rows, and the number of scenarios per simulator (from shard.json)."""
+    rows, scenarios = [], defaultdict(int)
     for d in shard_dirs:
         info = json.loads((Path(d) / "shard.json").read_text())
-        scenarios += info["scenarios"]
+        sim = "gazebo" if str(info.get("simulator", "")).startswith("gazebo") else "mujoco"
+        scenarios[sim] += info["scenarios"]
         with open(Path(d) / "episodes.csv") as f:
             for r in csv.DictReader(f):
-                for k in ("friction", "added_mass", "push_force", "latency_ms", "survival", "lin_vel_rmse", "yaw_rate_rmse", "distance"):
-                    r[k] = float(r[k])
+                for k in NUMERIC:
+                    r[k] = float(r[k]) if r[k] != "" else float("nan")
                 r["fell"] = int(r["fell"])
+                r["simulator"] = r.get("simulator") or sim
+                r["valid"] = int(r.get("valid", 1) or 1)
                 rows.append(r)
-    return rows, scenarios
+    return rows, dict(scenarios)
 
 
 def figure(summaries: dict, path: Path) -> None:
@@ -123,6 +132,12 @@ def figure(summaries: dict, path: Path) -> None:
     plt.close(fig)
 
 
+def _fmt(x, pct=False):
+    if x is None or (isinstance(x, float) and math.isnan(x)):
+        return "-"
+    return f"{x:.1%}" if pct else f"{x:.3f}"
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--models-json", required=True)
@@ -142,97 +157,132 @@ def main() -> None:
     data = json.loads(Path(a.data_asset_json).read_text())
     data_ref = f"{data['name']}:{data['version']}"
     rows, n_scen = load_rows(a.shard_dir)
+    sims = sorted(n_scen)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    results = {}
+    # results[model key][simulator] = summary
+    results: dict[str, dict] = {}
     for m in models:
         key = f"{m['name']}:{m['version']}"
-        mrows = [r for r in rows if r["model"] == m["name"] and r["version"] == str(m["version"])]
-        if len(mrows) != n_scen:
-            raise SystemExit(f"{key}: {len(mrows)} episodes, expected {n_scen} (missing shard?)")
-        s = summarize(mrows)
-        s["passed"] = s["fall_rate"] <= a.max_fall_rate and s["lin_vel_rmse"] <= a.max_lin_vel_rmse
-        s.update({"model": m, "key": key})
-        results[key] = s
-        with open(out / f"episodes-{m['name']}-v{m['version']}.csv", "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(mrows[0]))
-            w.writeheader()
-            w.writerows(mrows)
+        results[key] = {"model": m, "sims": {}}
+        for sim in sims:
+            mrows = [r for r in rows if r["model"] == m["name"] and r["version"] == str(m["version"]) and r["simulator"] == sim]
+            if len(mrows) != n_scen[sim]:
+                raise SystemExit(f"{key} {sim}: {len(mrows)} episodes, expected {n_scen[sim]} (missing shard?)")
+            valid = [r for r in mrows if r["valid"]]
+            s = summarize(valid)
+            s["invalid_episodes"] = len(mrows) - len(valid)
+            inv = defaultdict(int)
+            for r in mrows:
+                if not r["valid"]:
+                    inv[f"{r['split']}/{r['group']}"] += 1
+            s["invalid_by_group"] = dict(inv)
+            s["startup_failures"] = sum(int(r.get("startup_failures") or 0) for r in mrows)
+            s["passed"] = s["fall_rate"] <= a.max_fall_rate and s["lin_vel_rmse"] <= a.max_lin_vel_rmse
+            results[key]["sims"][sim] = s
+            with open(out / f"episodes-{m['name']}-v{m['version']}-{sim}.csv", "w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=list(mrows[0]))
+                w.writeheader()
+                w.writerows(mrows)
+        results[key]["passed"] = all(s["passed"] for s in results[key]["sims"].values())
 
     # Console report (shows up in the OSMO task log)
-    print(f"\nsim2sim on {data_ref}: {n_scen} scenarios per model; gate = in-distribution fall rate <= "
-          f"{a.max_fall_rate:.0%} and velocity RMSE <= {a.max_lin_vel_rmse} m/s")
-    print(f"{'model':28s} {'role':10s} {'fall':>7s} {'v_rmse':>7s} {'yaw_rmse':>8s} {'ood_fall':>8s}  gate")
-    for k, s in results.items():
-        print(f"{k:28s} {s['model'].get('role', ''):10s} {s['fall_rate']:7.1%} {s['lin_vel_rmse']:7.3f} "
-              f"{s['yaw_rate_rmse']:8.3f} {s['ood_fall_rate']:8.1%}  {'PASS' if s['passed'] else 'FAIL'}")
-    groups = sorted({g for s in results.values() for g in s["by_group"]})
+    print(f"\nsim2sim on {data_ref}: scenarios per model {n_scen}; gate (every simulator) = in-distribution "
+          f"fall rate <= {a.max_fall_rate:.0%} and velocity RMSE <= {a.max_lin_vel_rmse} m/s")
+    print(f"{'model':22s} {'role':10s} {'simulator':9s} {'fall':>7s} {'v_rmse':>7s} {'yaw_rmse':>8s} {'ood_fall':>8s} {'invalid':>7s}  gate")
+    for k, res in results.items():
+        for sim, s in res["sims"].items():
+            print(f"{k:22s} {res['model'].get('role', ''):10s} {sim:9s} {_fmt(s['fall_rate'], True):>7s} "
+                  f"{_fmt(s['lin_vel_rmse']):>7s} {_fmt(s['yaw_rate_rmse']):>8s} {_fmt(s['ood_fall_rate'], True):>8s} "
+                  f"{s['invalid_episodes']:7d}  {'PASS' if s['passed'] else 'FAIL'}")
+    cols = [(k, sim) for k, res in results.items() for sim in res["sims"]]
+    groups = sorted({g for res in results.values() for s in res["sims"].values() for g in s["by_group"]})
     print("\nfall rate by scenario group:")
-    print(f"{'group':22s}" + "".join(f"{k:>24s}" for k in results))
+    print(f"{'group':22s}" + "".join(f"{k + ' ' + sim:>30s}" for k, sim in cols))
     for g in groups:
-        print(f"{g:22s}" + "".join(f"{s['by_group'].get(g, {}).get('fall_rate', float('nan')):24.1%}" for s in results.values()))
+        print(f"{g:22s}" + "".join(f"{_fmt(results[k]['sims'][sim]['by_group'].get(g, {}).get('fall_rate'), True):>30s}" for k, sim in cols))
 
-    # Decision
-    decision = {"mode": a.mode, "data_asset": data_ref}
+    if any(s["invalid_episodes"] for res in results.values() for s in res["sims"].values()):
+        print("\ninvalid episodes by scenario group (excluded from the statistics):")
+        for k, res in results.items():
+            for sim, s in res["sims"].items():
+                if s["invalid_episodes"]:
+                    print(f"  {k} {sim}: {s['invalid_by_group']}")
+
+    # Decision: the candidate must pass on every simulator and not be worse than the champion on any
+    decision = {"mode": a.mode, "data_asset": data_ref, "simulators": sims}
     exit_msg = None
     if a.mode == "promote":
-        cand = next((s for s in results.values() if s["model"].get("role") == "candidate"), None)
-        champ = next((s for s in results.values() if s["model"].get("role") == "champion"), None)
+        cand = next((r for r in results.values() if r["model"].get("role") == "candidate"), None)
+        champ = next((r for r in results.values() if r["model"].get("role") == "champion"), None)
         if cand is None:
             raise SystemExit("promote mode needs a model with role=candidate")
+        ckey = f"{cand['model']['name']}:{cand['model']['version']}"
+        hkey = f"{champ['model']['name']}:{champ['model']['version']}" if champ else None
+        worse = [sim for sim in sims if champ and (
+            cand["sims"][sim]["fall_rate"] > champ["sims"][sim]["fall_rate"] + a.champion_margin_fall
+            or cand["sims"][sim]["lin_vel_rmse"] > champ["sims"][sim]["lin_vel_rmse"] + a.champion_margin_rmse)]
         if not cand["passed"]:
             decision["promotion"] = "rejected-gate"
-            exit_msg = f"sim2sim gate failed for {cand['key']}"
-        elif champ and (cand["fall_rate"] > champ["fall_rate"] + a.champion_margin_fall
-                        or cand["lin_vel_rmse"] > champ["lin_vel_rmse"] + a.champion_margin_rmse):
+            failed = [sim for sim in sims if not cand["sims"][sim]["passed"]]
+            exit_msg = f"sim2sim gate failed for {ckey} in {', '.join(failed)}"
+        elif worse:
             decision["promotion"] = "rejected-champion"
+            decision["worse_in"] = worse
         else:
             decision["promotion"] = "promoted"
-        decision.update(candidate=cand["key"], champion=champ["key"] if champ else None)
+        decision.update(candidate=ckey, champion=hkey)
     else:
-        prod = [s for s in results.values() if s["model"].get("role") == "champion"]
+        prod = [r for r in results.values() if r["model"].get("role") == "champion"]
         if prod and not prod[0]["passed"]:
-            exit_msg = f"production model {prod[0]['key']} no longer passes the gate on {data_ref}"
+            exit_msg = f"production model {prod[0]['model']['name']}:{prod[0]['model']['version']} no longer passes the gate on {data_ref}"
     print(f"\ndecision: {json.dumps(decision)}")
 
     fig_path = out / "fall_rate_by_factor.png"
     try:
-        figure(results, fig_path)
+        figure({f"{k} {sim}": s for k, res in results.items() for sim, s in res["sims"].items()}, fig_path)
     except Exception as e:  # the figure is a nice-to-have
         print(f"figure skipped: {e}")
 
     if not a.offline:
         client = ml_client()
         mlflow = setup_mlflow(client, a.experiment)
-        for k, s in results.items():
-            m = s["model"]
-            tags = {**workflow_tags(), "stage": "sim2sim-validation", "simulator": "mujoco", "model_name": m["name"],
-                    "model_version": str(m["version"]), "data_asset": data_ref, "role": m.get("role", "")}
-            if m.get("run_id"):
-                tags["mlflow.parentRunId"] = m["run_id"]
-            with mlflow.start_run(run_name=f"sim2sim-{m['name']}-v{m['version']}", tags=tags) as run:
-                mlflow.log_params({"scenarios": n_scen, "max_fall_rate": a.max_fall_rate,
-                                   "max_lin_vel_rmse": a.max_lin_vel_rmse, "mode": a.mode, "rl_type": m.get("rl_type")})
-                mlflow.log_metrics({x: s[x] for x in ("fall_rate", "lin_vel_rmse", "yaw_rate_rmse", "mean_survival", "ood_fall_rate")
-                                    if not math.isnan(s[x])})
-                mlflow.log_metrics({f"fall_rate.{g.replace('/', '.')}": v["fall_rate"] for g, v in s["by_group"].items()})
-                mlflow.log_metric("gate_passed", int(s["passed"]))
-                mlflow.log_dict({x: s[x] for x in ("by_group", "by_bin")}, "breakdown.json")
-                mlflow.log_artifact(str(out / f"episodes-{m['name']}-v{m['version']}.csv"))
-                if fig_path.exists():
-                    mlflow.log_artifact(str(fig_path))
-                s["mlflow_run_id"] = run.info.run_id
+        for k, res in results.items():
+            m = res["model"]
+            for sim, s in res["sims"].items():
+                tags = {**workflow_tags(), "stage": "sim2sim-validation", "simulator": sim, "model_name": m["name"],
+                        "model_version": str(m["version"]), "data_asset": data_ref, "role": m.get("role", "")}
+                if m.get("run_id"):
+                    tags["mlflow.parentRunId"] = m["run_id"]
+                with mlflow.start_run(run_name=f"sim2sim-{m['name']}-v{m['version']}-{sim}", tags=tags) as run:
+                    mlflow.log_params({"scenarios": n_scen[sim], "max_fall_rate": a.max_fall_rate,
+                                       "max_lin_vel_rmse": a.max_lin_vel_rmse, "mode": a.mode, "rl_type": m.get("rl_type")})
+                    metrics = {x: s[x] for x in ("fall_rate", "lin_vel_rmse", "yaw_rate_rmse", "mean_survival", "ood_fall_rate")}
+                    metrics.update(invalid_episodes=s["invalid_episodes"], startup_failures=s["startup_failures"],
+                                   gate_passed=int(s["passed"]))
+                    metrics.update({f"fall_rate.{g.replace('/', '.')}": v["fall_rate"] for g, v in s["by_group"].items()})
+                    mlflow.log_metrics({x: v for x, v in metrics.items() if not (isinstance(v, float) and math.isnan(v))})
+                    mlflow.log_dict({x: s[x] for x in ("by_group", "by_bin")}, "breakdown.json")
+                    mlflow.log_artifact(str(out / f"episodes-{m['name']}-v{m['version']}-{sim}.csv"))
+                    if fig_path.exists():
+                        mlflow.log_artifact(str(fig_path))
+                    s["mlflow_run_id"] = run.info.run_id
 
             model = client.models.get(m["name"], version=str(m["version"]))
             t = dict(model.tags or {})
             t.update({
-                "sim2sim_validation": "passed" if s["passed"] else "failed",
+                "sim2sim_validation": "passed" if res["passed"] else "failed",
                 "sim2sim_data_asset": data_ref,
-                "sim2sim_fall_rate": f"{s['fall_rate']:.3f}",
-                "sim2sim_lin_vel_rmse": f"{s['lin_vel_rmse']:.3f}",
-                "sim2sim_ood_fall_rate": f"{s['ood_fall_rate']:.3f}",
+                "sim2sim_simulators": ",".join(sims),
+                # worst case over the simulators
+                "sim2sim_fall_rate": f"{max(s['fall_rate'] for s in res['sims'].values()):.3f}",
+                "sim2sim_lin_vel_rmse": f"{max(s['lin_vel_rmse'] for s in res['sims'].values()):.3f}",
+                "sim2sim_ood_fall_rate": f"{max(s['ood_fall_rate'] for s in res['sims'].values()):.3f}",
             })
+            for sim, s in res["sims"].items():
+                t[f"sim2sim_{sim}_fall_rate"] = f"{s['fall_rate']:.3f}"
+                t[f"sim2sim_{sim}_lin_vel_rmse"] = f"{s['lin_vel_rmse']:.3f}"
             if a.mode == "promote" and decision.get("promotion") == "promoted":
                 if k == decision["candidate"]:
                     t["stage"] = "production"

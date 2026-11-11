@@ -22,9 +22,10 @@ _Edges: green = private (VNet / Private Link) · orange dashed = public entry (A
 | CPU task node pool (`npcpu`) | — | `Standard_D8s_v4` × 1–3, with taint `osmo/workload=cpu:NoSchedule`. Dedicated to OSMO CPU tasks (the `default` platform). Keep at least 1 node, because OSMO rejects tasks for a platform that has no free capacity. |
 | Public ingress (Traefik) | Static public IP `pip-<base>-ingress`, plus NSG `nsg-<base>-aks` on `snet-aks` | Only 80/443 to the ingress IP are allowed from the Internet. Traefik binds to this IP (see deploy/README.md, step 5). |
 | AzureML workspace (`azureml.tf`) | Public endpoint with Entra ID + RBAC (`aml_public_network_access_enabled`, default on, so Studio works in a browser), plus a private endpoint | Basic SKU, system-assigned identity, identity-based access to its default storage (no Shared Key). System of record for experiments (MLflow), models and data assets. The AzureML AKS extension is **not** installed: OSMO stays the executor. |
+| Container registry ACR (`acr.tf`, `acr_enabled`, default on) | Private only (PE) | Premium (required for private endpoints), admin user disabled. The AKS kubelet identity has AcrPull; the OSMO workload identity has AcrPush, and images are built and pushed by an OSMO task inside the cluster (`deploy/workflows/build-image.yaml`). Holds prebuilt simulation images such as the Gazebo (ROS 2) image. |
 | AzureML default storage / robotics data lake (ADLS Gen2) | Private only (private endpoints: blob + file / blob + dfs) | Shared Key disabled. The data lake simulates the customer's robot data store and is registered as the AzureML datastore `robotics_data` (identity-based). |
 
-Azure Container Registry is out of scope for phase 1. Images are pulled directly from nvcr.io.
+Platform images are pulled directly from public registries such as nvcr.io; the private ACR only holds simulation images that need to be prebuilt.
 
 ## Resource naming
 
@@ -62,6 +63,7 @@ Default names (`<sfx>` is the unique suffix):
 | AzureML workspace / Application Insights | `mlw-osmo-poc-wus3` / `appi-osmo-poc-wus3` |
 | AzureML storage / data lake (container) | `stosmopocwus3ml<sfx>` / `stosmopocwus3dl<sfx>` (`robotics-data`) |
 | AzureML private endpoints | `pep-osmo-poc-wus3-{mlw,mlst-blob,mlst-file,dl-blob,dl-dfs}` |
+| ACR / private endpoint | `crosmopocwus3<sfx>` / `pep-osmo-poc-wus3-acr` |
 
 Some names are fixed and do not follow these variables:
 - The `privatelink.*` private DNS zones (names set by Azure)
@@ -121,6 +123,7 @@ kubectl get nodes
 | `postgres_admin_password` / `redis_primary_key` | Sensitive. Read by `deploy/scripts/02-osmo-service.sh` and stored as Kubernetes Secrets |
 | `key_vault_name` / `key_vault_uri` | Private Key Vault for later Key Vault CSI integration |
 | `aml_workspace_name` / `aml_workspace_id` | AzureML workspace used by `deploy/scripts/07-azureml-loop.sh` |
+| `acr_name` / `acr_login_server` | Private ACR, used by `deploy/scripts/08-legged-sim2sim.sh` (build and run the Gazebo image) and `02-osmo-service.sh` (skip OSMO's submit-time check for this registry) |
 | `data_lake_account_name` / `data_lake_container_name` / `data_lake_datastore_name` | Robotics data lake and its AzureML datastore |
 
 ## Notes

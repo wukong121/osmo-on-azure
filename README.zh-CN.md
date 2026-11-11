@@ -17,7 +17,7 @@ _连线说明：绿色 = 私网（VNet / Private Link）· 橙色虚线 = 公网
 | [docs/reference-repos.md](docs/reference-repos.md) | 参考仓库研读结论（NVIDIA/OSMO、microsoft/physical-ai-toolchain）：版本选择、PG TLS、可复用内容 |
 | [docs/operations-guide.md](docs/operations-guide.md) | 操作手册：恢复环境、登录、查看调度记录和日志、资源查看、成本控制、常见问题 |
 | [docs/azureml-loop.md](docs/azureml-loop.md) | OSMO + AzureML 闭环：数据湖 → T4 上 Isaac Lab 训练 → MLflow 实验跟踪和模型注册 → MuJoCo 和 Gazebo 中的 sim2sim 验证 |
-| [docs/legged-sim2sim.md](docs/legged-sim2sim.md) | 点足双足机器人 sim2sim 大规模验证：1000+ 场景在 CPU 池上分片并行，按摔倒率和速度跟踪门禁，在 AzureML 模型注册表中做冠军 / 挑战者晋级 |
+| [docs/legged-sim2sim.md](docs/legged-sim2sim.md) | 点足双足机器人在 MuJoCo 和 Gazebo（厂商 ROS 2 部署栈）中的 sim2sim 大规模验证：场景在 CPU 池上分片并行，按摔倒率和速度跟踪门禁，在 AzureML 模型注册表中做冠军 / 挑战者晋级 |
 | [docs/t4-feasibility.md](docs/t4-feasibility.md) | T4 GPU 运行 Isaac Lab / Isaac Sim / MuJoCo / Gazebo 的可行性评估 |
 | [docs/images/](docs/images/) | Azure 部署架构图、OSMO + AzureML 闭环时序图、腿式机器人 sim2sim 时序图、OSMO 部署架构图、工作流时序图 |
 | [infra/terraform/](infra/terraform/README.zh-CN.md) | Azure 基础设施：AKS（系统池、CPU 池、T4 Spot GPU 池）、私网数据组件、固定入口 IP、AzureML 工作区和机器人数据湖 |
@@ -50,5 +50,6 @@ _连线说明：绿色 = 私网（VNet / Private Link）· 橙色虚线 = 公网
   - 数据来自私网 ADLS Gen2 数据湖，注册为 AzureML 数据资产；全部使用 Workload Identity 访问。
 - **腿式机器人 sim2sim 大规模验证**（[docs/legged-sim2sim.md](docs/legged-sim2sim.md)）：
   - 替代手柄驱动的手工 sim2sim：两套点足双足机器人预训练策略在 MuJoCo 中跑 1000–1200 个场景（速度指令 × 摩擦 × 负载 × 推力 × 延迟），切成 10 个 OSMO 任务并行。
+  - 第二个仿真器直接运行厂商自己的 ROS 2 部署栈（Gazebo Classic + ros2_control + C++ RL 控制器），跑一个场景子集；镜像在集群内构建，存放在私有 ACR；模型必须在两个仿真器中都通过。
   - 按摔倒率和速度跟踪做门禁，决定哪个版本晋级 `stage=production`（冠军 / 挑战者）；场景集升级后对所有已注册模型重新验证。
 - **已知限制**：见 [deploy/README.zh-CN.md](deploy/README.zh-CN.md#已知限制第一阶段)。例如，在 OSMO 6.4 发布之前，workflow-data 需要依赖 SAS 轮换器这一变通方案；订阅每晚会自动停机。

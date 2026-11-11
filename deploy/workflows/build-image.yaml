@@ -1,0 +1,47 @@
+# Build a container image inside the cluster and push it to the private ACR.
+#
+# kaniko builds without a Docker daemon or privileges. It pushes with the pod's Workload
+# Identity (id-osmo has AcrPush on the registry): the acr-env credential helper bundled with
+# kaniko exchanges the projected service-account token for a registry token, so there are no
+# passwords. The registry is reached through its private endpoint.
+#
+# Submit with deploy/scripts/08-legged-sim2sim.sh image (fills in the registry and build args):
+#   osmo workflow submit build-image.yaml --pool default --set-string registry=<acr>.azurecr.io \
+#     image=legged-gazebo-ros2:<tag> dockerfile=../images/legged-gazebo-ros2/Dockerfile \
+#     build_args="KEY=VALUE KEY2=VALUE2"
+workflow:
+  name: build-image
+  timeout:
+    exec_timeout: 90m
+    queue_timeout: 30m
+  resources:
+    builder:
+      cpu: 4
+      memory: 16Gi
+      storage: 80Gi
+  tasks:
+  - name: build
+    image: gcr.io/kaniko-project/executor:v1.23.2-debug
+    resource: builder
+    files:
+    - localpath: {{dockerfile}}
+      path: /workspace/Dockerfile
+    command: ["/busybox/sh", "-c"]
+    args:
+    - |
+      set -e
+      mkdir -p /kaniko/.docker
+      echo '{"credHelpers": {"{{registry}}": "acr-env"}}' > /kaniko/.docker/config.json
+      ARGS=""
+      for kv in {{build_args}}; do ARGS="$ARGS --build-arg $kv"; done
+      /kaniko/executor --context dir:///workspace --dockerfile /workspace/Dockerfile \
+        --destination "{{registry}}/{{image}}" $ARGS \
+        --snapshot-mode=redo --use-new-run --compressed-caching=false \
+        --digest-file /workspace/digest
+      echo "pushed {{registry}}/{{image}}@$(cat /workspace/digest)"
+
+default-values:
+  registry: ""
+  image: ""
+  dockerfile: ../images/legged-gazebo-ros2/Dockerfile
+  build_args: ""

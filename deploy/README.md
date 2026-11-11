@@ -18,7 +18,7 @@ This directory deploys NVIDIA OSMO 6.3.1 onto the AKS cluster created by [infra/
 | Keycloak (browser login, optional) | Keycloak Operator 26.8.2 (official manifests) | `keycloak` | OIDC provider at `https://<hostname>/auth`, realm `osmo`. Groups `osmo-admins` / `osmo-users` map to OSMO roles through the token `roles` claim. Database `keycloak` on the existing PostgreSQL (dedicated login, TLS). |
 | Workflow-data SAS rotator | [manifests/workflow-data-sas-rotator.yaml](manifests/workflow-data-sas-rotator.yaml) | `osmo` | A CronJob that works around an OSMO 6.3.1 bug (see below). Remove it after upgrading to OSMO 6.4. |
 | AzureML closed loop (optional) | [workflows/rl-train-validate.yaml](workflows/rl-train-validate.yaml), [workflows/azureml-seed-data.yaml](workflows/azureml-seed-data.yaml) | `osmo-workflows` | Plain OSMO workflows that call AzureML (MLflow, model registry, data assets) with Workload Identity. Nothing is installed in the cluster. See [docs/azureml-loop.md](../docs/azureml-loop.md). |
-| Legged sim2sim at scale (optional) | [workflows/legged-seed.yaml](workflows/legged-seed.yaml), [workflows/legged-validate.yaml](workflows/legged-validate.yaml) | `osmo-workflows` | Point-foot biped policies validated in MuJoCo across N parallel CPU tasks, gated and promoted in the AzureML model registry. Robot and policy sources come from `scripts/legged.env` (see `legged.env.example`). See [docs/legged-sim2sim.md](../docs/legged-sim2sim.md). |
+| Legged sim2sim at scale (optional) | [workflows/legged-seed.yaml](workflows/legged-seed.yaml), [workflows/legged-validate.yaml](workflows/legged-validate.yaml), [workflows/build-image.yaml](workflows/build-image.yaml), [images/legged-gazebo-ros2/](images/legged-gazebo-ros2/Dockerfile) | `osmo-workflows` | Point-foot biped policies validated in MuJoCo and in Gazebo Classic with the vendor's ROS 2 stack, across parallel CPU tasks, gated and promoted in the AzureML model registry. The Gazebo image is built in the cluster (kaniko) and pushed to the private ACR; `02-osmo-service.sh` adds the ACR to OSMO's `disable_registry_validation`. Robot and policy sources come from `scripts/legged.env` (see `legged.env.example`). See [docs/legged-sim2sim.md](../docs/legged-sim2sim.md). |
 
 ## Phase-1 design
 
@@ -72,7 +72,7 @@ OSMO_HOSTNAME=osmo.example.com KEYCLOAK_ADMINS="alice@example.com" KEYCLOAK_USER
 
 # Optional: AzureML closed loop (needs infra/terraform/azureml.tf applied)
 deploy/scripts/07-azureml-loop.sh       # seed data asset, then train (T4) -> register -> sim2sim validation (MuJoCo + Gazebo) -> gate
-deploy/scripts/08-legged-sim2sim.sh seed import validate   # legged robot: scenario set + policies, then sharded MuJoCo validation -> gate
+deploy/scripts/08-legged-sim2sim.sh image seed import validate   # legged robot: Gazebo image, scenario set + policies, then sharded MuJoCo + Gazebo validation -> gate
 
 # After the cluster was stopped (e.g. nightly auto-shutdown)
 deploy/scripts/00-resume.sh

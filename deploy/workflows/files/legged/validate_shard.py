@@ -21,7 +21,7 @@ import mujoco
 
 from pointfoot_sim import Policy, PointfootSim, rollout
 
-FIELDS = ["model", "version", "scenario", "split", "group", "friction", "added_mass", "push_force", "latency_ms",
+FIELDS = ["model", "version", "simulator", "scenario", "split", "group", "friction", "added_mass", "push_force", "latency_ms",
           "fell", "fall_time", "survival", "lin_vel_rmse", "yaw_rate_rmse", "distance"]
 
 
@@ -55,7 +55,7 @@ def main() -> None:
                 r = rollout(sim, pol, sc)
                 falls += r.fell
                 w.writerow({
-                    "model": m["name"], "version": m["version"], "scenario": sc["id"], "split": sc["split"],
+                    "model": m["name"], "version": m["version"], "simulator": "mujoco", "scenario": sc["id"], "split": sc["split"],
                     "group": sc["group"], "friction": sc["friction"], "added_mass": sc["added_mass"],
                     "push_force": sc["push_force"], "latency_ms": sc["latency_ms"],
                     "fell": int(r.fell), "fall_time": "" if r.fall_time is None else round(r.fall_time, 3),

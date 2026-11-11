@@ -74,6 +74,7 @@ locals {
     storage_data    = "st${local.base_name_compact}dl${local.unique_suffix}"
     pgsql           = "pgsql-${local.base_name}-${local.unique_suffix}"
     amr             = "amr-${local.base_name}-${local.unique_suffix}"
+    acr             = "cr${local.base_name_compact}${local.unique_suffix}"
 
     # 私有终结点（pep）及其网卡（nic）
     pep_kv            = "pep-${local.base_name}-kv"
@@ -92,6 +93,8 @@ locals {
     nic_pep_data_blob = "nic-pep-${local.base_name}-dl-blob"
     pep_data_dfs      = "pep-${local.base_name}-dl-dfs"
     nic_pep_data_dfs  = "nic-pep-${local.base_name}-dl-dfs"
+    pep_acr           = "pep-${local.base_name}-acr"
+    nic_pep_acr       = "nic-pep-${local.base_name}-acr"
 
     # 监控
     log_analytics          = "log-${local.base_name}"
@@ -121,6 +124,10 @@ resource "terraform_data" "naming_validation" {
     precondition {
       condition     = can(regex("^[a-z0-9]{3,24}$", local.names.storage_aml)) && can(regex("^[a-z0-9]{3,24}$", local.names.storage_data))
       error_message = "AzureML / 数据湖存储账号名称 ${local.names.storage_aml} / ${local.names.storage_data} 不合法：3-24 位小写字母数字。请缩短 workload / environment。"
+    }
+    precondition {
+      condition     = can(regex("^[a-z0-9]{5,50}$", local.names.acr))
+      error_message = "ACR 名称 ${local.names.acr} 不合法：5-50 位小写字母数字。"
     }
     precondition {
       condition     = length(local.names.pgsql) <= 63 && length(local.names.amr) <= 63

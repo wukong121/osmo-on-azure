@@ -22,9 +22,10 @@ _连线说明：绿色 = 私网（VNet / Private Link）· 橙色虚线 = 公网
 | CPU 作业节点池（`npcpu`） | — | `Standard_D8s_v4` × 1–3，带 taint `osmo/workload=cpu:NoSchedule`，专门运行 OSMO 的 CPU 任务（`default` 平台）。请至少保留 1 台：平台没有空闲资源时，OSMO 会直接拒绝提交 |
 | 公网入口（Traefik） | 固定公网 IP `pip-<base>-ingress`，以及 `snet-aks` 上的 NSG `nsg-<base>-aks` | 只允许来自 Internet、访问入口 IP 80/443 端口的流量。Traefik 绑定到这个 IP（见 deploy/README.zh-CN.md 第 5 步） |
 | AzureML 工作区（`azureml.tf`） | 公网端点（Entra ID + RBAC 保护，由 `aml_public_network_access_enabled` 控制，默认开启，便于在浏览器里使用 Studio），另有私有终结点 | Basic SKU，系统分配标识，默认存储用 Identity 访问（不用 Shared Key）。作为实验（MLflow）、模型和数据资产的记录系统。**不安装** AzureML 的 AKS 扩展，执行仍由 OSMO 负责 |
+| 容器镜像仓库 ACR（`acr.tf`，`acr_enabled`，默认开启） | 仅私网（PE） | Premium（私有终结点需要），不启用管理员账号。AKS kubelet 身份有 AcrPull；OSMO 工作负载身份有 AcrPush，镜像由 OSMO 任务在集群内构建并推送（`deploy/workflows/build-image.yaml`）。存放预构建的仿真镜像，如 Gazebo（ROS 2）镜像 |
 | AzureML 默认存储 / 机器人数据湖（ADLS Gen2） | 仅私网（私有终结点：blob + file / blob + dfs） | 禁用 Shared Key。数据湖模拟客户的机器人数据存储，注册为 AzureML 数据存储 `robotics_data`（Identity 访问） |
 
-ACR 不在第一阶段范围内，镜像直接从 nvcr.io 拉取。
+平台组件的镜像直接从 nvcr.io 等公共仓库拉取；私有 ACR 只存放需要预构建的仿真镜像。
 
 ## 资源命名
 
@@ -62,6 +63,7 @@ ACR 不在第一阶段范围内，镜像直接从 nvcr.io 拉取。
 | AzureML 工作区 / Application Insights | `mlw-osmo-poc-wus3` / `appi-osmo-poc-wus3` |
 | AzureML 存储 / 数据湖（容器） | `stosmopocwus3ml<sfx>` / `stosmopocwus3dl<sfx>`（`robotics-data`） |
 | AzureML 相关私有终结点 | `pep-osmo-poc-wus3-{mlw,mlst-blob,mlst-file,dl-blob,dl-dfs}` |
+| ACR / 私有终结点 | `crosmopocwus3<sfx>` / `pep-osmo-poc-wus3-acr` |
 
 固定名称（不随变量变化）：私有 DNS 区域 `privatelink.*`（Azure 规定）、DCR 关联 `ContainerInsightsExtension`
 （Container Insights 约定）、
@@ -120,6 +122,7 @@ kubectl get nodes
 | `postgres_admin_password` / `redis_primary_key` | 敏感输出，由 `deploy/scripts/02-osmo-service.sh` 读取并写入 K8s Secret |
 | `key_vault_name` / `key_vault_uri` | 私网 Key Vault，供后续接入 Key Vault CSI |
 | `aml_workspace_name` / `aml_workspace_id` | AzureML 工作区，`deploy/scripts/07-azureml-loop.sh` 使用 |
+| `acr_name` / `acr_login_server` | 私有 ACR，`deploy/scripts/08-legged-sim2sim.sh`（构建和使用 Gazebo 镜像）和 `02-osmo-service.sh`（跳过 OSMO 对该仓库的提交时校验）使用 |
 | `data_lake_account_name` / `data_lake_container_name` / `data_lake_datastore_name` | 机器人数据湖及其 AzureML 数据存储 |
 
 ## 注意事项

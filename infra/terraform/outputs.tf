@@ -125,3 +125,11 @@ output "data_lake_container_name" {
 output "data_lake_datastore_name" {
   value = azurerm_machine_learning_datastore_datalake_gen2.robotics_data.name
 }
+
+output "acr_name" {
+  value = var.acr_enabled ? azurerm_container_registry.main[0].name : ""
+}
+
+output "acr_login_server" {
+  value = var.acr_enabled ? azurerm_container_registry.main[0].login_server : ""
+}

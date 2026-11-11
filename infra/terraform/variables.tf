@@ -179,6 +179,12 @@ variable "cpu_node_max_count" {
   default     = 3
 }
 
+variable "acr_enabled" {
+  description = "是否创建私有 Azure Container Registry（Premium + 私有终结点），用于预构建的仿真镜像"
+  type        = bool
+  default     = true
+}
+
 variable "gpu_node_pool_enabled" {
   description = "是否创建 GPU 节点池"
   type        = bool

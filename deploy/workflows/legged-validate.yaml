@@ -6,7 +6,12 @@
 #                  models=<name>:all        every registered version (re-validation on new data)
 #   validate-i   Shard i of <shards>: every model on scenarios with id % shards == i, in MuJoCo
 #                (headless, deterministic, 1 kHz physics / 50 Hz policy). Pure simulation.
-#   gate         Merge the shards, score each model on the in-distribution scenarios
+#   gazebo-i     Shard i of <gazebo_shards> (0 = off): every model on a deterministic subset of
+#                the scenarios (gazebo_subset_in + gazebo_subset_out; latency scenarios skipped)
+#                in Gazebo Classic 11 with the vendor's ROS 2 stack (ros2_control hardware plugin
+#                + C++ RL controller), real time. Image <gazebo_image> from the private ACR
+#                (deploy/images/legged-gazebo-ros2, built by build-image.yaml).
+#   gate         Merge the shards, score each model per simulator on the in-distribution scenarios
 #                (fall rate <= max_fall_rate, velocity RMSE <= max_lin_vel_rmse), break failures
 #                down by stress factor, log one MLflow run per model, tag the model versions, and
 #                (mode=promote) promote the candidate to stage=production if it passes and is not
@@ -18,8 +23,10 @@
 workflow:
   name: legged-validate
   timeout:
-    exec_timeout: 60m
-    queue_timeout: 30m
+    # Gazebo shards run in real time (~30 min each) and queue behind each other when the CPU
+    # pool is full, so allow a long queue
+    exec_timeout: 120m
+    queue_timeout: 120m
   resources:
     cpu1:
       cpu: 1
@@ -29,6 +36,10 @@ workflow:
       cpu: 2
       memory: 4Gi
       storage: 5Gi
+    gazebo:
+      cpu: 2
+      memory: 6Gi
+      storage: 10Gi
   tasks:
   - name: fetch
     image: python:3.12-slim
@@ -67,6 +78,8 @@ workflow:
     files:
     - localpath: files/legged/pointfoot_sim.py
       path: /opt/legged/pointfoot_sim.py
+    - localpath: files/legged/episode_metrics.py
+      path: /opt/legged/episode_metrics.py
     - localpath: files/legged/validate_shard.py
       path: /opt/legged/validate_shard.py
     command: ["bash", "-c"]
@@ -79,6 +92,32 @@ workflow:
         --shard {{i}} --shards {{shards}} --out {{output}}
 {% endfor %}
 
+{% for i in range(gazebo_shards|int) %}
+  - name: gazebo-{{i}}
+    image: "{{gazebo_image}}"
+    resource: gazebo
+    inputs:
+    - task: fetch
+    files:
+    - localpath: files/legged/episode_metrics.py
+      path: /opt/legged/episode_metrics.py
+    - localpath: files/legged/gazebo_episode.py
+      path: /opt/legged/gazebo_episode.py
+    - localpath: files/legged/validate_gazebo_shard.py
+      path: /opt/legged/validate_gazebo_shard.py
+    environment:
+      ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+    command: ["bash", "-c"]
+    args:
+    - |
+      set -eo pipefail
+      source /etc/profile.d/ros.sh
+      cd /opt/legged
+      python3 validate_gazebo_shard.py --data-dir {{input:0}}/data --models-dir {{input:0}}/models \
+        --shard {{i}} --shards {{gazebo_shards}} --subset-in {{gazebo_subset_in}} --subset-out {{gazebo_subset_out}} \
+        --out {{output}} 2>&1 | grep -v -E "RTPS_TRANSPORT_SHM|RTPS_PARTICIPANT"
+{% endfor %}
+
   - name: gate
     image: python:3.12-slim
     resource: cpu2
@@ -86,6 +125,9 @@ workflow:
     - task: fetch
 {% for i in range(shards) %}
     - task: validate-{{i}}
+{% endfor %}
+{% for i in range(gazebo_shards|int) %}
+    - task: gazebo-{{i}}
 {% endfor %}
     files:
     - localpath: files/rl/aml_common.py
@@ -107,7 +149,7 @@ workflow:
       # Every validate-i output folder holds a shard.json (input folders are siblings of input 0)
       SHARDS=(); while read -r f; do SHARDS+=(--shard-dir "$(dirname "$f")"); done \
         < <(find "$(dirname {{input:0}})" -name shard.json | sort)
-      echo "found $(find "$(dirname {{input:0}})" -name shard.json | wc -l) shards (expected {{shards}})"
+      echo "found $(find "$(dirname {{input:0}})" -name shard.json | wc -l) shards (expected {{shards}} MuJoCo + {{gazebo_shards}} Gazebo)"
       cd /opt/legged
       python gate.py --models-json {{input:0}}/models/models.json --data-asset-json {{input:0}}/data/data_asset.json \
         "${SHARDS[@]}" --mode "{{mode}}" --max-fall-rate {{max_fall_rate}} --max-lin-vel-rmse {{max_lin_vel_rmse}} \
@@ -121,6 +163,10 @@ default-values:
   dataset: pointfoot-sim2sim-scenarios
   mode: promote
   shards: 10
+  gazebo_shards: 0           # e.g. 8; needs gazebo_image
+  gazebo_image: ""           # <acr>.azurecr.io/legged-gazebo-ros2:<tag>
+  gazebo_subset_in: 120
+  gazebo_subset_out: 80
   max_fall_rate: 0.05
   max_lin_vel_rmse: 0.3
   experiment: pointfoot-sim2sim

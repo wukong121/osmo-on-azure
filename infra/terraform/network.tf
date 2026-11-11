@@ -95,6 +95,8 @@ locals {
     dfs     = "privatelink.dfs.core.windows.net"
     aml_api = "privatelink.api.azureml.ms"
     aml_nb  = "privatelink.notebooks.azure.net"
+    # 容器镜像仓库
+    acr = "privatelink.azurecr.io"
   }
 }
 
